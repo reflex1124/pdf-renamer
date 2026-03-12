@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Literal
 
 from openai import OpenAI
@@ -11,6 +12,7 @@ from pypdf import PdfReader
 from .models import AnalysisResult
 
 logger = logging.getLogger(__name__)
+SNAPSHOT_SUFFIX = re.compile(r"-\d{4}-\d{2}-\d{2}$")
 
 
 class AnalysisSchema(BaseModel):
@@ -35,6 +37,38 @@ class OpenAIPdfAnalyzer:
 
         self.client = OpenAI(api_key=api_key)
         self.model = model
+
+    def set_model(self, model: str) -> None:
+        self.model = model.strip() or self.model
+
+    def list_models(self) -> list[str]:
+        response = self.client.models.list()
+        preferred_models: list[str] = []
+        for model in response.data:
+            model_id = getattr(model, "id", "")
+            if not model_id.startswith("gpt-"):
+                continue
+            if SNAPSHOT_SUFFIX.search(model_id):
+                continue
+            if any(token in model_id for token in ("realtime", "audio", "transcribe", "tts", "search")):
+                continue
+            preferred_models.append(model_id)
+
+        def sort_key(model_id: str) -> tuple[int, str]:
+            priority = {
+                "gpt-5": 0,
+                "gpt-5-mini": 1,
+                "gpt-5-nano": 2,
+                "gpt-4.1": 3,
+                "gpt-4.1-mini": 4,
+                "gpt-4.1-nano": 5,
+                "gpt-4o": 6,
+                "gpt-4o-mini": 7,
+            }
+            return (priority.get(model_id, 99), model_id)
+
+        unique_models = sorted(set(preferred_models), key=sort_key)
+        return unique_models
 
     def extract_text(self, pdf_path: str, max_chars: int = 12000) -> str:
         reader = PdfReader(pdf_path)

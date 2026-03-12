@@ -4,12 +4,17 @@ import json
 import logging
 from pathlib import Path
 
-from PySide6.QtCore import QThreadPool, Qt, Signal
+from PySide6.QtCore import QThreadPool, Qt, QUrl, Signal
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QCheckBox,
+    QComboBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -47,7 +52,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("PDF Renamer")
-        self.resize(1280, 760)
+        self.resize(1120, 700)
         self.setAcceptDrops(True)
 
         self.items: dict[str, PdfItem] = {}
@@ -56,7 +61,7 @@ class MainWindow(QMainWindow):
         self.analyzer: OpenAIPdfAnalyzer | None = None
         self.analyzer_error = ""
         try:
-            self.analyzer = OpenAIPdfAnalyzer()
+            self.analyzer = OpenAIPdfAnalyzer(model=self.settings.openai_model)
         except Exception as exc:  # noqa: BLE001
             self.analyzer_error = str(exc)
             logger.warning("Analyzer initialization failed: %s", exc)
@@ -64,6 +69,12 @@ class MainWindow(QMainWindow):
         self.pdf_list = QListWidget()
         self.pdf_list.setSelectionMode(QAbstractItemView.SingleSelection)
         self.pdf_list.currentItemChanged.connect(self.on_selection_changed)
+        self.pdf_list.itemChanged.connect(self.on_list_item_changed)
+        self.pdf_list.itemDoubleClicked.connect(self.open_list_item_pdf)
+        self._updating_check_state = False
+        self.select_all_checkbox = QCheckBox("")
+        self.select_all_checkbox.setTristate(False)
+        self.select_all_checkbox.stateChanged.connect(self.on_select_all_changed)
 
         self.status_value = QLabel("-")
         self.doc_type_value = QLabel("-")
@@ -78,8 +89,14 @@ class MainWindow(QMainWindow):
         self.proposed_name_value.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self.proposed_name_value.setMinimumHeight(84)
         self.proposed_name_value.setProperty("role", "filename")
-        self.edit_proposed_name_button = QPushButton("候補名を編集")
+        self.edit_proposed_name_button = QPushButton("編集")
+        self.edit_proposed_name_button.setProperty("role", "tiny")
         self.edit_proposed_name_button.clicked.connect(self.edit_proposed_name)
+        self.model_combo = QComboBox()
+        self.model_combo.setEditable(True)
+        self.model_combo.addItem(self.settings.openai_model)
+        self.model_combo.setCurrentText(self.settings.openai_model)
+        self.model_combo.setInsertPolicy(QComboBox.NoInsert)
         self.naming_template_edit = QLineEdit(self.settings.naming_template)
         self.naming_template_edit.setPlaceholderText(DEFAULT_TEMPLATE)
         self.naming_template_hint = QLabel(
@@ -87,9 +104,26 @@ class MainWindow(QMainWindow):
         )
         self.naming_template_hint.setProperty("role", "hint")
         self.save_template_button = QPushButton("命名設定を保存")
+        self.save_template_button.setProperty("role", "subtle")
         self.save_template_button.clicked.connect(self.save_naming_template)
+        self.load_models_button = QPushButton("一覧取得")
+        self.load_models_button.setProperty("role", "subtle")
+        self.load_models_button.clicked.connect(self.load_available_models)
+        self.save_model_button = QPushButton("モデル設定を保存")
+        self.save_model_button.setProperty("role", "subtle")
+        self.save_model_button.clicked.connect(self.save_model_setting)
         self.analysis_json = QPlainTextEdit()
         self.analysis_json.setReadOnly(True)
+        for value_label in (
+            self.status_value,
+            self.doc_type_value,
+            self.issuer_value,
+            self.date_value,
+            self.amount_value,
+            self.title_value,
+            self.confidence_value,
+        ):
+            value_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
         self.analyze_button = QPushButton("解析")
         self.add_files_button = QPushButton("PDFを追加")
@@ -97,6 +131,12 @@ class MainWindow(QMainWindow):
         self.rename_button = QPushButton("リネーム")
         self.skip_button = QPushButton("スキップ")
         self.retry_button = QPushButton("再解析")
+        self.analyze_button.setProperty("role", "analyze")
+        self.retry_button.setProperty("role", "retry")
+        self.rename_button.setProperty("role", "rename")
+        self.skip_button.setProperty("role", "skip")
+        self.add_files_button.setProperty("role", "subtle")
+        self.clear_files_button.setProperty("role", "subtle")
 
         self.analyze_button.clicked.connect(self.analyze_selected_or_all)
         self.add_files_button.clicked.connect(self.pick_files)
@@ -113,6 +153,7 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         list_panel = QWidget()
         list_layout = QVBoxLayout(list_panel)
+        list_layout.setSpacing(6)
         header_row = QHBoxLayout()
         header_row.addWidget(QLabel("PDF一覧"))
         header_row.addStretch()
@@ -120,17 +161,50 @@ class MainWindow(QMainWindow):
         header_row.addWidget(self.clear_files_button)
         list_layout.addLayout(header_row)
         list_layout.addWidget(QLabel("このウィンドウ全体へ PDF をドラッグ&ドロップできます"))
-        list_layout.addWidget(self.pdf_list)
+        list_container = QFrame()
+        list_container.setProperty("role", "listContainer")
+        list_container_layout = QVBoxLayout(list_container)
+        list_container_layout.setContentsMargins(0, 0, 0, 0)
+        list_container_layout.setSpacing(0)
+        list_header_frame = QFrame()
+        list_header_frame.setProperty("role", "listHeader")
+        list_header_row = QHBoxLayout()
+        list_header_row.setContentsMargins(14, 10, 14, 10)
+        list_header_row.setSpacing(10)
+        self.select_all_checkbox.setFixedWidth(28)
+        filename_header = QLabel("ファイル名")
+        filename_header.setProperty("role", "hint")
+        list_header_row.addWidget(self.select_all_checkbox)
+        list_header_row.addWidget(filename_header)
+        list_header_row.addStretch()
+        list_header_frame.setLayout(list_header_row)
+        self.pdf_list.setProperty("role", "listBody")
+        list_container_layout.addWidget(list_header_frame)
+        list_container_layout.addWidget(self.pdf_list)
+        list_layout.addWidget(list_container)
 
         details_panel = QWidget()
         details_layout = QVBoxLayout(details_panel)
         details_layout.addWidget(QLabel("解析結果"))
+        details_layout.addWidget(QLabel("使用モデル"))
+        model_row = QHBoxLayout()
+        model_row.addWidget(self.model_combo)
+        model_row.addWidget(self.load_models_button)
+        model_row.addWidget(self.save_model_button)
+        details_layout.addLayout(model_row)
         details_layout.addWidget(QLabel("命名ルール"))
         details_layout.addWidget(self.naming_template_edit)
-        details_layout.addWidget(self.naming_template_hint)
-        details_layout.addWidget(self.save_template_button)
+        template_meta_row = QHBoxLayout()
+        template_meta_row.addWidget(self.naming_template_hint)
+        template_meta_row.addStretch()
+        template_meta_row.addWidget(self.save_template_button)
+        details_layout.addLayout(template_meta_row)
 
         form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        form.setFormAlignment(Qt.AlignTop | Qt.AlignLeft)
+        form.setHorizontalSpacing(16)
+        form.setVerticalSpacing(10)
         form.addRow("状態", self.status_value)
         form.addRow("文書種別", self.doc_type_value)
         form.addRow("発行元名 / 会社名", self.issuer_value)
@@ -139,9 +213,21 @@ class MainWindow(QMainWindow):
         form.addRow("タイトル", self.title_value)
         form.addRow("confidence", self.confidence_value)
         details_layout.addLayout(form)
-        details_layout.addWidget(QLabel("候補ファイル名"))
+        proposed_header_row = QHBoxLayout()
+        proposed_header_row.addWidget(QLabel("候補ファイル名"))
+        proposed_header_row.addWidget(self.edit_proposed_name_button)
+        proposed_header_row.addStretch()
+        details_layout.addLayout(proposed_header_row)
         details_layout.addWidget(self.proposed_name_value)
-        details_layout.addWidget(self.edit_proposed_name_button)
+        details_layout.addWidget(QLabel("操作"))
+        action_grid = QGridLayout()
+        action_grid.setHorizontalSpacing(10)
+        action_grid.setVerticalSpacing(10)
+        action_grid.addWidget(self.analyze_button, 0, 0)
+        action_grid.addWidget(self.retry_button, 0, 1)
+        action_grid.addWidget(self.rename_button, 1, 0)
+        action_grid.addWidget(self.skip_button, 1, 1)
+        details_layout.addLayout(action_grid)
         details_layout.addWidget(QLabel("AI 返答(JSON)"))
         details_layout.addWidget(self.analysis_json)
 
@@ -150,16 +236,9 @@ class MainWindow(QMainWindow):
         splitter.addWidget(details_panel)
         splitter.setSizes([500, 780])
 
-        button_row = QHBoxLayout()
-        button_row.addWidget(self.analyze_button)
-        button_row.addWidget(self.rename_button)
-        button_row.addWidget(self.skip_button)
-        button_row.addWidget(self.retry_button)
-
         container = QWidget()
         root_layout = QVBoxLayout(container)
         root_layout.addWidget(splitter)
-        root_layout.addLayout(button_row)
 
         self.setCentralWidget(container)
 
@@ -205,15 +284,16 @@ class MainWindow(QMainWindow):
                     stop:0 #2c86ff, stop:1 #42c6ff);
             }
             QPushButton:pressed {
-                background: #0d4fbe;
+                padding-top: 12px;
+                padding-bottom: 8px;
             }
             QSplitter::handle {
                 background: #142238;
                 width: 8px;
             }
             QListWidget::item {
-                padding: 10px;
-                margin: 4px 2px;
+                padding: 10px 12px;
+                margin: 2px 6px;
                 border-radius: 8px;
             }
             QListWidget::item:selected {
@@ -223,6 +303,38 @@ class MainWindow(QMainWindow):
             QPlainTextEdit, QLineEdit, QListWidget {
                 font-size: 13px;
             }
+            QPushButton[role="analyze"] {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #0f6bff, stop:1 #21b1ff);
+            }
+            QPushButton[role="retry"] {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #355c9a, stop:1 #4c7bc3);
+            }
+            QPushButton[role="rename"] {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #0aa36c, stop:1 #1fd39b);
+            }
+            QPushButton[role="skip"] {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #6b7280, stop:1 #8a94a6);
+            }
+            QPushButton[role="subtle"] {
+                min-width: 0px;
+                padding: 8px 12px;
+                font-size: 12px;
+                border-radius: 10px;
+            }
+            QPushButton[role="tiny"] {
+                min-width: 0px;
+                padding: 4px 8px;
+                font-size: 11px;
+                border-radius: 8px;
+            }
+            QPushButton[role="subtle"] {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #123a86, stop:1 #1760d4);
+            }
             QLabel[role="filename"] {
                 background: #0a1220;
                 color: #edf4ff;
@@ -230,6 +342,23 @@ class MainWindow(QMainWindow):
                 border-radius: 12px;
                 padding: 10px 12px;
                 font-size: 13px;
+            }
+            QFrame[role="listContainer"] {
+                background: #0a1220;
+                border: 1px solid #20324d;
+                border-radius: 12px;
+            }
+            QFrame[role="listHeader"] {
+                background: rgba(255, 255, 255, 0.02);
+                border: none;
+                border-bottom: 1px solid #20324d;
+            }
+            QListWidget[role="listBody"] {
+                border: none;
+                border-top-left-radius: 0px;
+                border-top-right-radius: 0px;
+                background: transparent;
+                padding: 4px 0px 6px 0px;
             }
             QMessageBox {
                 background: #08101d;
@@ -275,18 +404,26 @@ class MainWindow(QMainWindow):
                 continue
             item = PdfItem(source_path=path, current_path=path)
             self.items[key] = item
-            self.pdf_list.addItem(self._list_label(item))
+            list_item = QListWidgetItem(self._list_label(item))
+            list_item.setData(Qt.UserRole, key)
+            list_item.setFlags(
+                list_item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable,
+            )
+            list_item.setCheckState(Qt.Unchecked)
+            self.pdf_list.addItem(list_item)
             added_any = True
             logger.info("Added PDF: %s", path)
 
         if added_any and self.pdf_list.currentRow() == -1:
             self.pdf_list.setCurrentRow(0)
+        self._sync_select_all_checkbox()
 
     def clear_files(self) -> None:
         if not self.items:
             return
         self.items.clear()
         self.pdf_list.clear()
+        self.select_all_checkbox.setCheckState(Qt.Unchecked)
         self.update_details(None)
         logger.info("Cleared all registered PDFs")
 
@@ -295,11 +432,17 @@ class MainWindow(QMainWindow):
 
     def _refresh_list(self) -> None:
         current_key = self.current_item_key()
+        self._updating_check_state = True
         self.pdf_list.clear()
         for key, item in self.items.items():
             list_item = QListWidgetItem(self._list_label(item))
             list_item.setData(Qt.UserRole, key)
+            list_item.setFlags(
+                list_item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable,
+            )
+            list_item.setCheckState(Qt.Checked if item.checked else Qt.Unchecked)
             self.pdf_list.addItem(list_item)
+        self._updating_check_state = False
 
         if current_key:
             for index in range(self.pdf_list.count()):
@@ -307,6 +450,59 @@ class MainWindow(QMainWindow):
                 if list_item.data(Qt.UserRole) == current_key:
                     self.pdf_list.setCurrentRow(index)
                     break
+        self._sync_select_all_checkbox()
+
+    def on_list_item_changed(self, list_item: QListWidgetItem) -> None:
+        if self._updating_check_state:
+            return
+        key = list_item.data(Qt.UserRole)
+        if not key:
+            return
+        item = self.items.get(str(key))
+        if not item:
+            return
+        item.checked = list_item.checkState() == Qt.CheckState.Checked
+        self._sync_select_all_checkbox()
+
+    def on_select_all_changed(self, state: int) -> None:
+        if self._updating_check_state:
+            return
+        checked = Qt.CheckState(state) == Qt.CheckState.Checked
+        self._updating_check_state = True
+        for index in range(self.pdf_list.count()):
+            list_item = self.pdf_list.item(index)
+            if list_item is None:
+                continue
+            list_item.setCheckState(
+                Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked,
+            )
+            key = list_item.data(Qt.UserRole)
+            if key and str(key) in self.items:
+                self.items[str(key)].checked = checked
+        self._updating_check_state = False
+        self._sync_select_all_checkbox()
+
+    def _sync_select_all_checkbox(self) -> None:
+        total = len(self.items)
+        checked_count = sum(1 for item in self.items.values() if item.checked)
+        self._updating_check_state = True
+        self.select_all_checkbox.blockSignals(True)
+        if total > 0 and checked_count == total:
+            self.select_all_checkbox.setCheckState(Qt.CheckState.Checked)
+        else:
+            self.select_all_checkbox.setCheckState(Qt.CheckState.Unchecked)
+        self.select_all_checkbox.blockSignals(False)
+        self._updating_check_state = False
+
+    def checked_items(self) -> list[PdfItem]:
+        return [item for item in self.items.values() if item.checked]
+
+    def target_items(self) -> list[PdfItem]:
+        checked = self.checked_items()
+        if checked:
+            return checked
+        current = self.current_pdf_item()
+        return [current] if current else []
 
     def current_item_key(self) -> str | None:
         current = self.pdf_list.currentItem()
@@ -323,6 +519,15 @@ class MainWindow(QMainWindow):
         if not key:
             return None
         return self.items.get(key)
+
+    def open_list_item_pdf(self, list_item: QListWidgetItem) -> None:
+        key = list_item.data(Qt.UserRole)
+        if not key:
+            return
+        item = self.items.get(str(key))
+        if not item:
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(item.current_path)))
 
     def on_selection_changed(self) -> None:
         item = self.current_pdf_item()
@@ -369,12 +574,10 @@ class MainWindow(QMainWindow):
         if not self.analyzer:
             QMessageBox.warning(self, "OpenAI API", self.analyzer_error or "OpenAI クライアントを初期化できません。")
             return
-        selected = self.current_pdf_item()
-        if selected and selected.status not in {ItemStatus.ANALYZING, ItemStatus.RENAMED}:
-            self._start_analysis(selected)
-            return
-
-        for item in self.items.values():
+        targets = self.target_items()
+        if not targets:
+            targets = list(self.items.values())
+        for item in targets:
             if item.status in {ItemStatus.PENDING, ItemStatus.ERROR, ItemStatus.NEEDS_REVIEW, ItemStatus.READY}:
                 self._start_analysis(item)
 
@@ -446,7 +649,10 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "命名ルール", message)
             return
 
-        self.settings = AppSettings(naming_template=template)
+        self.settings = AppSettings(
+            naming_template=template,
+            openai_model=self.model_combo.currentText().strip() or self.settings.openai_model,
+        )
         save_settings(self.settings)
         logger.info("Saved naming template: %s", template)
 
@@ -462,48 +668,90 @@ class MainWindow(QMainWindow):
         self.update_details(self.current_pdf_item())
         QMessageBox.information(self, "命名ルール", "命名設定を保存しました。")
 
-    def rename_selected(self) -> None:
-        item = self.current_pdf_item()
-        if not item:
-            QMessageBox.information(self, "情報", "対象PDFを選択してください。")
+    def load_available_models(self) -> None:
+        if not self.analyzer:
+            QMessageBox.warning(self, "使用モデル", self.analyzer_error or "OpenAI クライアントを初期化できません。")
             return
-        if item.status == ItemStatus.RENAMED:
-            QMessageBox.information(self, "情報", "このPDFはすでにリネーム済みです。")
-            return
-        if not item.proposed_name:
-            QMessageBox.warning(self, "警告", "候補ファイル名がありません。先に解析してください。")
+        try:
+            current_text = self.model_combo.currentText().strip()
+            model_ids = self.analyzer.list_models()
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to load models: %s", exc)
+            QMessageBox.warning(self, "使用モデル", f"モデル一覧の取得に失敗しました。\n{exc}")
             return
 
-        normalized_name = ensure_pdf_extension(item.proposed_name)
-        same_name_target = item.current_path.parent / normalized_name
-        target = same_name_target
-        if same_name_target != item.current_path:
-            target = resolve_collision(item.current_path.parent, normalized_name)
-        source = item.current_path
-        source.rename(target)
-        item.current_path = target
-        item.status = ItemStatus.RENAMED
-        item.history.append(f"renamed:{target.name}")
-        logger.info("Renamed file: %s -> %s", source, target)
+        self.model_combo.clear()
+        for model_id in model_ids:
+            self.model_combo.addItem(model_id)
+        if current_text:
+            index = self.model_combo.findText(current_text)
+            if index >= 0:
+                self.model_combo.setCurrentIndex(index)
+            else:
+                self.model_combo.setEditText(current_text)
+        logger.info("Loaded %s models from OpenAI API", len(model_ids))
+
+    def save_model_setting(self) -> None:
+        model_name = self.model_combo.currentText().strip()
+        if not model_name:
+            QMessageBox.warning(self, "使用モデル", "モデル名を入力してください。")
+            return
+
+        self.settings = AppSettings(
+            naming_template=self.settings.naming_template,
+            openai_model=model_name,
+        )
+        save_settings(self.settings)
+        if self.analyzer:
+            self.analyzer.set_model(model_name)
+        logger.info("Saved OpenAI model: %s", model_name)
+        QMessageBox.information(self, "使用モデル", "モデル設定を保存しました。")
+
+    def rename_selected(self) -> None:
+        targets = self.target_items()
+        if not targets:
+            QMessageBox.information(self, "情報", "対象PDFにチェックを入れるか選択してください。")
+            return
+        renamed_any = False
+        for item in targets:
+            if item.status == ItemStatus.RENAMED or not item.proposed_name:
+                continue
+            normalized_name = ensure_pdf_extension(item.proposed_name)
+            same_name_target = item.current_path.parent / normalized_name
+            target = same_name_target
+            if same_name_target != item.current_path:
+                target = resolve_collision(item.current_path.parent, normalized_name)
+            source = item.current_path
+            source.rename(target)
+            item.current_path = target
+            item.status = ItemStatus.RENAMED
+            item.history.append(f"renamed:{target.name}")
+            logger.info("Renamed file: %s -> %s", source, target)
+            renamed_any = True
+        if not renamed_any:
+            QMessageBox.warning(self, "警告", "リネーム可能なPDFがありません。先に解析してください。")
+            return
         self._refresh_list()
-        self.update_details(item)
+        self.update_details(self.current_pdf_item())
 
     def skip_selected(self) -> None:
-        item = self.current_pdf_item()
-        if not item:
+        targets = self.target_items()
+        if not targets:
             return
-        item.status = ItemStatus.SKIPPED
-        item.skipped = True
-        item.history.append("skipped")
-        logger.info("Skipped file: %s", item.current_path)
+        for item in targets:
+            item.status = ItemStatus.SKIPPED
+            item.skipped = True
+            item.history.append("skipped")
+            logger.info("Skipped file: %s", item.current_path)
         self._refresh_list()
-        self.update_details(item)
+        self.update_details(self.current_pdf_item())
 
     def retry_selected(self) -> None:
-        item = self.current_pdf_item()
-        if not item:
+        targets = self.target_items()
+        if not targets:
             return
-        self._start_analysis(item)
+        for item in targets:
+            self._start_analysis(item)
 
 
 def run_app() -> int:

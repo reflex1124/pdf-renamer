@@ -21,6 +21,9 @@ def load_settings() -> AppSettings:
             naming_template=str(
                 data.get("naming_template", AppSettings().naming_template),
             ),
+            openai_model=str(
+                data.get("openai_model", AppSettings().openai_model),
+            ),
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Failed to load settings: %s", exc)

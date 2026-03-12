@@ -38,6 +38,7 @@ class AnalysisResult:
 @dataclass
 class AppSettings:
     naming_template: str = "{date}_{issuer_name}_{document_type}_{amount}"
+    openai_model: str = "gpt-4.1-mini"
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -52,6 +53,7 @@ class PdfItem:
     proposed_name: str = ""
     error_message: str = ""
     skipped: bool = False
+    checked: bool = False
     history: list[str] = field(default_factory=list)
 
     @property

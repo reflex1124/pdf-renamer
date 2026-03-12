@@ -27,6 +27,7 @@ OPENAI_API_KEY=sk-...
 
 - ログは `logs/app.log` に保存されます。
 - 命名ルール設定は `config/settings.json` に保存されます。
+- 使用する OpenAI モデル名も `config/settings.json` に保存されます。
 - 使えるトークンは `{date}`, `{issuer_name}`, `{document_type}`, `{amount}`, `{title}` です。
 - デフォルトの命名ルールは `{date}_{issuer_name}_{document_type}_{amount}` です。
 - 現在の最小構成では `pypdf` でテキスト抽出してから OpenAI に送ります。
