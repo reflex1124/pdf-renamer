@@ -4,17 +4,31 @@ PySide6 で作ったデスクトップ GUI アプリです。PDF をドラッグ
 
 ## Setup
 
+**macOS:**
 ```bash
 brew install python@3.12
 /opt/homebrew/bin/python3.12 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
 
+**Windows:**
+```bash
+py -3 -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
+```
+
 ## Run
 
+`.env` に `OPENAI_API_KEY` を設定してから:
+
+**macOS:**
 ```bash
-.env に OPENAI_API_KEY を設定
 .venv/bin/python main.py
+```
+
+**Windows:**
+```bash
+.venv\Scripts\python main.py
 ```
 
 `.env` の例:
