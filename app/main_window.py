@@ -4,8 +4,8 @@ import json
 import logging
 from pathlib import Path
 
-from PySide6.QtCore import QThreadPool, Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QSize, QThreadPool, Qt, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QFontMetrics
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QPlainTextEdit,
     QInputDialog,
+    QSizePolicy,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -43,9 +44,75 @@ from .file_utils import (
 from .models import AnalysisResult, AppSettings, ItemStatus, PdfItem
 from .openai_client import OpenAIPdfAnalyzer
 from .settings_store import load_settings, save_settings
-from .workers import AnalysisWorker
+from .workers import AnalysisWorker, BatchAnalysisWorker
 
 logger = logging.getLogger(__name__)
+
+
+class PdfListRow(QWidget):
+    checked_changed = Signal(str, bool)
+    clicked = Signal(str)
+    double_clicked = Signal(str)
+
+    def __init__(self, item_key: str, filename: str, checked: bool, status_text: str, badge_variant: str) -> None:
+        super().__init__()
+        self.item_key = item_key
+        self.full_filename = filename
+        self._build_ui(filename, checked, status_text, badge_variant)
+
+    def _build_ui(self, filename: str, checked: bool, status_text: str, badge_variant: str) -> None:
+        self.setMinimumHeight(30)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 3, 8, 3)
+        layout.setSpacing(2)
+
+        self.checkbox = QCheckBox("")
+        self.checkbox.setChecked(checked)
+        self.checkbox.setFixedWidth(28)
+        self.checkbox.stateChanged.connect(self._on_checked_changed)
+
+        self.badge = QLabel(status_text)
+        self.badge.setProperty("role", "statusBadge")
+        self.badge.setProperty("variant", badge_variant)
+        self.badge.setAlignment(Qt.AlignCenter)
+        self.badge.setMinimumHeight(20)
+        self.badge.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+
+        self.filename_label = QLabel(filename)
+        self.filename_label.setProperty("role", "listFilename")
+        self.filename_label.setWordWrap(False)
+        self.filename_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.filename_label.setMinimumWidth(100)
+        self.filename_label.setToolTip(filename)
+
+        for widget in (self.badge, self.filename_label):
+            widget.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+
+        layout.addWidget(self.checkbox)
+        layout.addWidget(self.badge)
+        layout.addWidget(self.filename_label, 1)
+        self._update_elided_filename()
+
+    def _on_checked_changed(self, state: int) -> None:
+        self.checked_changed.emit(self.item_key, state == Qt.CheckState.Checked.value)
+
+    def mousePressEvent(self, event) -> None:  # type: ignore[override]
+        self.clicked.emit(self.item_key)
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:  # type: ignore[override]
+        self.double_clicked.emit(self.item_key)
+        super().mouseDoubleClickEvent(event)
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        self._update_elided_filename()
+
+    def _update_elided_filename(self) -> None:
+        metrics = QFontMetrics(self.filename_label.font())
+        available_width = max(40, self.filename_label.width() - 4)
+        self.filename_label.setText(metrics.elidedText(self.full_filename, Qt.TextElideMode.ElideRight, available_width))
 
 
 class MainWindow(QMainWindow):
@@ -68,6 +135,7 @@ class MainWindow(QMainWindow):
 
         self.pdf_list = QListWidget()
         self.pdf_list.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.pdf_list.setSpacing(2)
         self.pdf_list.currentItemChanged.connect(self.on_selection_changed)
         self.pdf_list.itemChanged.connect(self.on_list_item_changed)
         self.pdf_list.itemDoubleClicked.connect(self.open_list_item_pdf)
@@ -77,11 +145,17 @@ class MainWindow(QMainWindow):
         self.select_all_checkbox.stateChanged.connect(self.on_select_all_changed)
 
         self.status_value = QLabel("-")
+        self.status_value.setProperty("role", "statusBadge")
+        self.status_value.setProperty("compact", True)
+        self.status_value.setProperty("variant", "idle")
+        self.status_value.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.doc_type_value = QLabel("-")
         self.issuer_value = QLabel("-")
         self.date_value = QLabel("-")
         self.amount_value = QLabel("-")
         self.title_value = QLabel("-")
+        self.description_value = QLabel("-")
+        self.description_value.setWordWrap(True)
         self.confidence_value = QLabel("-")
         self.proposed_name_value = QLabel("-")
         self.proposed_name_value.setWordWrap(True)
@@ -121,6 +195,7 @@ class MainWindow(QMainWindow):
             self.date_value,
             self.amount_value,
             self.title_value,
+            self.description_value,
             self.confidence_value,
         ):
             value_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -160,7 +235,7 @@ class MainWindow(QMainWindow):
         header_row.addWidget(self.add_files_button)
         header_row.addWidget(self.clear_files_button)
         list_layout.addLayout(header_row)
-        list_layout.addWidget(QLabel("このウィンドウ全体へ PDF をドラッグ&ドロップできます"))
+        list_layout.addSpacing(8)
         list_container = QFrame()
         list_container.setProperty("role", "listContainer")
         list_container_layout = QVBoxLayout(list_container)
@@ -211,6 +286,7 @@ class MainWindow(QMainWindow):
         form.addRow("日付", self.date_value)
         form.addRow("金額", self.amount_value)
         form.addRow("タイトル", self.title_value)
+        form.addRow("内容 / 内訳", self.description_value)
         form.addRow("confidence", self.confidence_value)
         details_layout.addLayout(form)
         proposed_header_row = QHBoxLayout()
@@ -256,6 +332,42 @@ class MainWindow(QMainWindow):
                 color: #7da6e8;
                 font-size: 12px;
             }
+            QLabel[role="statusBadge"] {
+                color: #f5fbff;
+                border-radius: 10px;
+                padding: 2px 8px;
+                font-size: 11px;
+                font-weight: 700;
+                min-width: 58px;
+            }
+            QLabel[role="statusBadge"][compact="true"] {
+                min-width: 0px;
+                padding: 2px 10px;
+            }
+            QLabel[role="statusBadge"][variant="idle"] {
+                background: #314158;
+            }
+            QLabel[role="statusBadge"][variant="pending"] {
+                background: #4c5d75;
+            }
+            QLabel[role="statusBadge"][variant="analyzing"] {
+                background: #0f6bff;
+            }
+            QLabel[role="statusBadge"][variant="ready"] {
+                background: #0aa36c;
+            }
+            QLabel[role="statusBadge"][variant="review"] {
+                background: #d68a10;
+            }
+            QLabel[role="statusBadge"][variant="skipped"] {
+                background: #6b7280;
+            }
+            QLabel[role="statusBadge"][variant="renamed"] {
+                background: #0f8b72;
+            }
+            QLabel[role="statusBadge"][variant="error"] {
+                background: #c24141;
+            }
             QListWidget, QPlainTextEdit, QLineEdit {
                 background: #0a1220;
                 color: #edf4ff;
@@ -292,13 +404,29 @@ class MainWindow(QMainWindow):
                 width: 8px;
             }
             QListWidget::item {
-                padding: 10px 12px;
-                margin: 2px 6px;
-                border-radius: 8px;
+                padding: 0px;
+                margin: 0px;
+                border: none;
+                background: transparent;
             }
             QListWidget::item:selected {
+                background: transparent;
+            }
+            QWidget[role="listRow"] {
+                background: transparent;
+                border: 1px solid transparent;
+                border-radius: 10px;
+            }
+            QWidget[role="listRow"][selected="true"] {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #123a86, stop:1 #1760d4);
+                    stop:0 rgba(18, 58, 134, 0.88), stop:1 rgba(23, 96, 212, 0.88));
+                border: 1px solid rgba(92, 154, 255, 0.75);
+            }
+            QLabel[role="listFilename"] {
+                color: #edf4ff;
+                font-size: 13px;
+                font-weight: 600;
+                background: transparent;
             }
             QPlainTextEdit, QLineEdit, QListWidget {
                 font-size: 13px;
@@ -358,7 +486,7 @@ class MainWindow(QMainWindow):
                 border-top-left-radius: 0px;
                 border-top-right-radius: 0px;
                 background: transparent;
-                padding: 4px 0px 6px 0px;
+                padding: 10px 8px 10px 8px;
             }
             QMessageBox {
                 background: #08101d;
@@ -404,18 +532,19 @@ class MainWindow(QMainWindow):
                 continue
             item = PdfItem(source_path=path, current_path=path)
             self.items[key] = item
-            list_item = QListWidgetItem(self._list_label(item))
+            list_item = QListWidgetItem()
             list_item.setData(Qt.UserRole, key)
-            list_item.setFlags(
-                list_item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable,
-            )
-            list_item.setCheckState(Qt.Unchecked)
+            list_item.setFlags(list_item.flags() | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
             self.pdf_list.addItem(list_item)
+            row = self._create_list_row(key, item)
+            list_item.setSizeHint(QSize(0, 36))
+            self.pdf_list.setItemWidget(list_item, row)
             added_any = True
             logger.info("Added PDF: %s", path)
 
         if added_any and self.pdf_list.currentRow() == -1:
             self.pdf_list.setCurrentRow(0)
+        self._refresh_row_selection()
         self._sync_select_all_checkbox()
 
     def clear_files(self) -> None:
@@ -427,21 +556,49 @@ class MainWindow(QMainWindow):
         self.update_details(None)
         logger.info("Cleared all registered PDFs")
 
-    def _list_label(self, item: PdfItem) -> str:
-        return f"[{item.status.value}] {item.display_name}"
+    def _status_meta(self, status: ItemStatus) -> tuple[str, str]:
+        mapping = {
+            ItemStatus.PENDING: ("未解析", "pending"),
+            ItemStatus.ANALYZING: ("解析中", "analyzing"),
+            ItemStatus.READY: ("解析済み", "ready"),
+            ItemStatus.NEEDS_REVIEW: ("要確認", "review"),
+            ItemStatus.SKIPPED: ("スキップ", "skipped"),
+            ItemStatus.RENAMED: ("リネーム済み", "renamed"),
+            ItemStatus.ERROR: ("エラー", "error"),
+        }
+        return mapping.get(status, ("不明", "idle"))
+
+    def _apply_badge_style(self, label: QLabel, text: str, variant: str) -> None:
+        label.setText(text)
+        label.setProperty("variant", variant)
+        style = label.style()
+        if style is not None:
+            style.unpolish(label)
+            style.polish(label)
+        label.update()
+
+    def _create_list_row(self, key: str, item: PdfItem) -> PdfListRow:
+        status_text, badge_variant = self._status_meta(item.status)
+        row = PdfListRow(key, item.display_name, item.checked, status_text, badge_variant)
+        row.setProperty("role", "listRow")
+        row.setProperty("selected", False)
+        row.checked_changed.connect(self.on_row_checked_changed)
+        row.clicked.connect(self.select_item_by_key)
+        row.double_clicked.connect(self.open_pdf_by_key)
+        return row
 
     def _refresh_list(self) -> None:
         current_key = self.current_item_key()
         self._updating_check_state = True
         self.pdf_list.clear()
         for key, item in self.items.items():
-            list_item = QListWidgetItem(self._list_label(item))
+            list_item = QListWidgetItem()
             list_item.setData(Qt.UserRole, key)
-            list_item.setFlags(
-                list_item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable,
-            )
-            list_item.setCheckState(Qt.Checked if item.checked else Qt.Unchecked)
+            list_item.setFlags(list_item.flags() | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            row = self._create_list_row(key, item)
+            list_item.setSizeHint(QSize(0, 36))
             self.pdf_list.addItem(list_item)
+            self.pdf_list.setItemWidget(list_item, row)
         self._updating_check_state = False
 
         if current_key:
@@ -450,18 +607,19 @@ class MainWindow(QMainWindow):
                 if list_item.data(Qt.UserRole) == current_key:
                     self.pdf_list.setCurrentRow(index)
                     break
+        self._refresh_row_selection()
         self._sync_select_all_checkbox()
 
     def on_list_item_changed(self, list_item: QListWidgetItem) -> None:
+        return
+
+    def on_row_checked_changed(self, key: str, checked: bool) -> None:
         if self._updating_check_state:
             return
-        key = list_item.data(Qt.UserRole)
-        if not key:
-            return
-        item = self.items.get(str(key))
+        item = self.items.get(key)
         if not item:
             return
-        item.checked = list_item.checkState() == Qt.CheckState.Checked
+        item.checked = checked
         self._sync_select_all_checkbox()
 
     def on_select_all_changed(self, state: int) -> None:
@@ -473,12 +631,12 @@ class MainWindow(QMainWindow):
             list_item = self.pdf_list.item(index)
             if list_item is None:
                 continue
-            list_item.setCheckState(
-                Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked,
-            )
             key = list_item.data(Qt.UserRole)
             if key and str(key) in self.items:
                 self.items[str(key)].checked = checked
+            row = self.pdf_list.itemWidget(list_item)
+            if isinstance(row, PdfListRow):
+                row.checkbox.setChecked(checked)
         self._updating_check_state = False
         self._sync_select_all_checkbox()
 
@@ -530,18 +688,36 @@ class MainWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(item.current_path)))
 
     def on_selection_changed(self) -> None:
+        self._refresh_row_selection()
         item = self.current_pdf_item()
         self.update_details(item)
 
+    def _refresh_row_selection(self) -> None:
+        current_key = self.current_item_key()
+        for index in range(self.pdf_list.count()):
+            list_item = self.pdf_list.item(index)
+            if list_item is None:
+                continue
+            row = self.pdf_list.itemWidget(list_item)
+            if not isinstance(row, PdfListRow):
+                continue
+            row.setProperty("selected", list_item.data(Qt.UserRole) == current_key)
+            style = row.style()
+            if style is not None:
+                style.unpolish(row)
+                style.polish(row)
+            row.update()
+
     def update_details(self, item: PdfItem | None) -> None:
         if not item:
+            self._apply_badge_style(self.status_value, "-", "idle")
             for widget in (
-                self.status_value,
                 self.doc_type_value,
                 self.issuer_value,
                 self.date_value,
                 self.amount_value,
                 self.title_value,
+                self.description_value,
                 self.confidence_value,
             ):
                 widget.setText("-")
@@ -549,13 +725,15 @@ class MainWindow(QMainWindow):
             self.analysis_json.setPlainText("")
             return
 
-        self.status_value.setText(item.status.value)
+        status_text, badge_variant = self._status_meta(item.status)
+        self._apply_badge_style(self.status_value, status_text, badge_variant)
         if item.analysis:
             self.doc_type_value.setText(item.analysis.document_type or "-")
             self.issuer_value.setText(item.analysis.issuer_name or "-")
             self.date_value.setText(item.analysis.date or "-")
             self.amount_value.setText(item.analysis.amount or "-")
             self.title_value.setText(item.analysis.title or "-")
+            self.description_value.setText(item.analysis.description or "-")
             self.confidence_value.setText(f"{item.analysis.confidence:.2f}")
             self.analysis_json.setPlainText(
                 json.dumps(item.analysis.to_dict(), ensure_ascii=False, indent=2),
@@ -566,9 +744,23 @@ class MainWindow(QMainWindow):
             self.date_value.setText("-")
             self.amount_value.setText("-")
             self.title_value.setText("-")
+            self.description_value.setText("-")
             self.confidence_value.setText("-")
             self.analysis_json.setPlainText(item.error_message)
         self.proposed_name_value.setText(item.proposed_name or "-")
+
+    def select_item_by_key(self, key: str) -> None:
+        for index in range(self.pdf_list.count()):
+            list_item = self.pdf_list.item(index)
+            if list_item and list_item.data(Qt.UserRole) == key:
+                self.pdf_list.setCurrentItem(list_item)
+                return
+
+    def open_pdf_by_key(self, key: str) -> None:
+        item = self.items.get(key)
+        if not item:
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(item.current_path)))
 
     def analyze_selected_or_all(self) -> None:
         if not self.analyzer:
@@ -577,9 +769,17 @@ class MainWindow(QMainWindow):
         targets = self.target_items()
         if not targets:
             targets = list(self.items.values())
-        for item in targets:
-            if item.status in {ItemStatus.PENDING, ItemStatus.ERROR, ItemStatus.NEEDS_REVIEW, ItemStatus.READY}:
-                self._start_analysis(item)
+        analyzable = [
+            item
+            for item in targets
+            if item.status in {ItemStatus.PENDING, ItemStatus.ERROR, ItemStatus.NEEDS_REVIEW, ItemStatus.READY}
+        ]
+        if not analyzable:
+            return
+        if len(analyzable) == 1:
+            self._start_analysis(analyzable[0])
+            return
+        self._start_batch_analysis(analyzable)
 
     def _start_analysis(self, item: PdfItem) -> None:
         if not self.analyzer:
@@ -596,6 +796,24 @@ class MainWindow(QMainWindow):
         )
         worker.signals.result.connect(self.on_analysis_result)
         worker.signals.error.connect(self.on_analysis_error)
+        self.thread_pool.start(worker)
+
+    def _start_batch_analysis(self, items: list[PdfItem]) -> None:
+        if not self.analyzer or not items:
+            return
+        for item in items:
+            item.status = ItemStatus.ANALYZING
+            item.error_message = ""
+        self._refresh_list()
+        self.update_details(self.current_pdf_item())
+
+        worker = BatchAnalysisWorker(
+            self.analyzer,
+            [item.current_path for item in items],
+            self.settings.naming_template,
+        )
+        worker.signals.result.connect(self.on_batch_analysis_result)
+        worker.signals.error.connect(lambda message: self.on_batch_analysis_error(items, message))
         self.thread_pool.start(worker)
 
     def on_analysis_result(self, path: str, analysis: AnalysisResult, proposed_name: str) -> None:
@@ -623,6 +841,29 @@ class MainWindow(QMainWindow):
         self._refresh_list()
         if self.current_pdf_item() is item:
             self.update_details(item)
+
+    def on_batch_analysis_result(self, payload: dict[str, tuple[AnalysisResult, str]]) -> None:
+        for path, (analysis, proposed_name) in payload.items():
+            item = self.items.get(str(Path(path).resolve()))
+            if not item:
+                continue
+            item.analysis = analysis
+            item.proposed_name = proposed_name
+            item.error_message = ""
+            item.status = ItemStatus.READY if analysis.confidence >= 0.8 else ItemStatus.NEEDS_REVIEW
+            item.history.append(f"analyzed:{json.dumps(analysis.to_dict(), ensure_ascii=False)}")
+            logger.info("Batch analysis completed for %s", path)
+        self._refresh_list()
+        self.update_details(self.current_pdf_item())
+
+    def on_batch_analysis_error(self, items: list[PdfItem], message: str) -> None:
+        for item in items:
+            item.status = ItemStatus.ERROR
+            item.error_message = message
+            item.history.append(f"error:{message}")
+            logger.error("Batch analysis failed for %s: %s", item.current_path, message)
+        self._refresh_list()
+        self.update_details(self.current_pdf_item())
 
     def edit_proposed_name(self) -> None:
         item = self.current_pdf_item()

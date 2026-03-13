@@ -18,6 +18,12 @@ class AnalysisWorkerSignals(QObject):
     finished = Signal(str)
 
 
+class BatchAnalysisWorkerSignals(QObject):
+    result = Signal(object)
+    error = Signal(str)
+    finished = Signal(object)
+
+
 class AnalysisWorker(QRunnable):
     def __init__(
         self,
@@ -41,3 +47,34 @@ class AnalysisWorker(QRunnable):
             self.signals.error.emit(str(self.pdf_path), str(exc))
         finally:
             self.signals.finished.emit(str(self.pdf_path))
+
+
+class BatchAnalysisWorker(QRunnable):
+    def __init__(
+        self,
+        analyzer: OpenAIPdfAnalyzer,
+        pdf_paths: list[Path],
+        naming_template: str,
+    ) -> None:
+        super().__init__()
+        self.analyzer = analyzer
+        self.pdf_paths = pdf_paths
+        self.naming_template = naming_template
+        self.signals = BatchAnalysisWorkerSignals()
+
+    def run(self) -> None:
+        resolved_paths = [str(path.resolve()) for path in self.pdf_paths]
+        try:
+            analyses = self.analyzer.analyze_pdfs(resolved_paths)
+            payload: dict[str, tuple[AnalysisResult, str]] = {}
+            for path, analysis in analyses.items():
+                payload[path] = (
+                    analysis,
+                    build_proposed_filename(analysis, self.naming_template),
+                )
+            self.signals.result.emit(payload)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Batch analysis failed for %s PDF(s)", len(self.pdf_paths))
+            self.signals.error.emit(str(exc))
+        finally:
+            self.signals.finished.emit(resolved_paths)

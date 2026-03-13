@@ -3,7 +3,8 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import Literal
+import json
+from pathlib import Path
 
 from openai import OpenAI
 from pydantic import BaseModel, Field
@@ -16,17 +17,28 @@ SNAPSHOT_SUFFIX = re.compile(r"-\d{4}-\d{2}-\d{2}$")
 
 
 class AnalysisSchema(BaseModel):
-    document_type: Literal["請求書", "領収書", "契約書", "その他"] = Field(
-        description="文書の種別",
-    )
-    issuer_name: str | None = Field(default=None, description="発行元名または会社名")
+    document_type: str = Field(description="日本語の文書種別。例: 請求書、領収書、見積書、納品書、契約書、注文書、明細書、その他。")
+    issuer_name: str | None = Field(default=None, description="Issuer, vendor, sender, or company name.")
     date: str | None = Field(
         default=None,
-        description="文書上の代表日付。分かる場合は必ず YYYY-MM-DD 形式で返す",
+        description="Document date in YYYY-MM-DD when possible. Use YYYY-MM-01 if only year-month is known.",
     )
-    amount: str | None = Field(default=None, description="金額")
-    title: str | None = Field(default=None, description="文書タイトル")
-    confidence: float = Field(description="0.0から1.0の信頼度")
+    amount: str | None = Field(default=None, description="Primary monetary amount mentioned in the document if available.")
+    title: str | None = Field(default=None, description="Short descriptive title for the document.")
+    description: str | None = Field(
+        default=None,
+        description="Main item, description, contents, line item summary, or service/product summary found in the document.",
+    )
+    confidence: float = Field(description="Confidence score from 0.0 to 1.0.")
+
+
+class BatchAnalysisItem(BaseModel):
+    document_id: str = Field(description="The exact document_id provided in the request.")
+    analysis: AnalysisSchema
+
+
+class BatchAnalysisResponse(BaseModel):
+    documents: list[BatchAnalysisItem]
 
 
 class OpenAIPdfAnalyzer:
@@ -73,54 +85,94 @@ class OpenAIPdfAnalyzer:
     def extract_text(self, pdf_path: str, max_chars: int = 12000) -> str:
         reader = PdfReader(pdf_path)
         chunks: list[str] = []
+        total_chars = 0
         for page in reader.pages:
             text = page.extract_text() or ""
-            if text.strip():
-                chunks.append(text.strip())
-            if sum(len(chunk) for chunk in chunks) >= max_chars:
+            stripped = text.strip()
+            if stripped:
+                chunks.append(stripped)
+                total_chars += len(stripped)
+            if total_chars >= max_chars:
                 break
 
         extracted = "\n\n".join(chunks).strip()
         if not extracted:
-            raise RuntimeError("PDF からテキストを抽出できませんでした。スキャン画像のみのPDFは別途OCRが必要です。")
+            raise RuntimeError("PDF からテキストを抽出できませんでした。画像PDFはOCRが必要です。")
 
         return extracted[:max_chars]
 
-    def analyze_pdf(self, pdf_path: str) -> AnalysisResult:
-        logger.info("Analyzing PDF: %s", pdf_path)
-        text = self.extract_text(pdf_path)
+    def _build_batch_input(self, pdf_paths: list[str], max_chars_per_pdf: int = 6000) -> list[dict[str, str]]:
+        documents: list[dict[str, str]] = []
+        for index, pdf_path in enumerate(pdf_paths, start=1):
+            text = self.extract_text(pdf_path, max_chars=max_chars_per_pdf)
+            documents.append(
+                {
+                    "document_id": str(index),
+                    "filename": Path(pdf_path).name,
+                    "text": text,
+                }
+            )
+        return documents
 
+    def analyze_pdfs(self, pdf_paths: list[str]) -> dict[str, AnalysisResult]:
+        if not pdf_paths:
+            return {}
+
+        logger.info("Analyzing %s PDF(s) in a single request", len(pdf_paths))
+        documents = self._build_batch_input(pdf_paths)
         response = self.client.responses.parse(
             model=self.model,
             input=[
                 {
                     "role": "system",
                     "content": (
-                        "あなたは文書分類アシスタントです。"
-                        "渡されたPDF抽出テキストを読み、必ず指定スキーマで情報抽出してください。"
-                        "日付は分かる場合、必ず YYYY-MM-DD 形式で返してください。"
-                        "月名を使う表記や locale 依存の表記は使わないでください。"
-                        "日まで不明で年月までしか分からない場合は YYYY-MM-01 を返してください。"
-                        "不明な項目は null とし、confidence は 0.0 から 1.0 の間で返してください。"
+                        "You extract structured metadata from PDF text. "
+                        "Multiple documents are included in one request. "
+                        "Treat each document independently, but use the full batch for consistency of naming and categorization. "
+                        "Return every provided document_id exactly once. "
+                        "The document_type must always be written in Japanese. "
+                        "Use labels such as '請求書', '領収書', '見積書', '納品書', '契約書', '注文書', '明細書', or 'その他'. "
+                        "Extract description from fields such as 内容, 内訳, Description, Item, Details, or similar. "
+                        "description should be a short summary of what the charge or document is for. "
+                        "For missing values, use null. "
+                        "Preserve the original currency in amount values and normalize it to ISO currency codes. "
+                        "For example use 'USD 12.34', 'JPY 1200', 'EUR 9.99', or 'GBP 72.10' instead of symbols or converted currencies. "
+                        "Dates must be normalized to YYYY-MM-DD when possible, or YYYY-MM-01 if only year and month are known. "
+                        "Confidence must be a number between 0.0 and 1.0."
                     ),
                 },
                 {
                     "role": "user",
                     "content": (
-                        "次のPDFテキストから情報を抽出してください。"
-                        "date は必ず YYYY-MM-DD 形式で返してください。\n\n"
-                        f"{text}"
+                        "Analyze the following PDF texts and return structured results for all documents.\n\n"
+                        f"{json.dumps(documents, ensure_ascii=False, indent=2)}"
                     ),
                 },
             ],
-            text_format=AnalysisSchema,
+            text_format=BatchAnalysisResponse,
         )
+
         parsed = response.output_parsed
-        return AnalysisResult(
-            document_type=parsed.document_type,
-            issuer_name=parsed.issuer_name,
-            date=parsed.date,
-            amount=parsed.amount,
-            title=parsed.title,
-            confidence=max(0.0, min(1.0, parsed.confidence)),
-        )
+        results_by_id: dict[str, AnalysisResult] = {}
+        for item in parsed.documents:
+            results_by_id[item.document_id] = AnalysisResult(
+                document_type=item.analysis.document_type,
+                issuer_name=item.analysis.issuer_name,
+                date=item.analysis.date,
+                amount=item.analysis.amount,
+                title=item.analysis.title,
+                description=item.analysis.description,
+                confidence=max(0.0, min(1.0, item.analysis.confidence)),
+            )
+
+        missing_ids = [doc["document_id"] for doc in documents if doc["document_id"] not in results_by_id]
+        if missing_ids:
+            raise RuntimeError(f"解析結果が不足しています: {', '.join(missing_ids)}")
+
+        return {
+            pdf_path: results_by_id[document["document_id"]]
+            for pdf_path, document in zip(pdf_paths, documents, strict=True)
+        }
+
+    def analyze_pdf(self, pdf_path: str) -> AnalysisResult:
+        return self.analyze_pdfs([pdf_path])[pdf_path]

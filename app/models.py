@@ -22,6 +22,7 @@ class AnalysisResult:
     date: str | None
     amount: str | None
     title: str | None
+    description: str | None
     confidence: float
 
     def to_dict(self) -> dict[str, object]:
@@ -31,6 +32,7 @@ class AnalysisResult:
             "date": self.date,
             "amount": self.amount,
             "title": self.title,
+            "description": self.description,
             "confidence": self.confidence,
         }
 

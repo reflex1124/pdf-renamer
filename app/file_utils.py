@@ -16,6 +16,38 @@ AVAILABLE_TOKENS = (
     "document_type",
     "amount",
     "title",
+    "description",
+)
+
+_ALPHA_CURRENCY_MARKERS = (
+    ("USD", "USD"),
+    ("US$", "USD"),
+    ("AUD", "AUD"),
+    ("CAD", "CAD"),
+    ("SGD", "SGD"),
+    ("HKD", "HKD"),
+    ("JPY", "JPY"),
+    ("EUR", "EUR"),
+    ("GBP", "GBP"),
+    ("CNY", "CNY"),
+    ("RMB", "CNY"),
+    ("CHF", "CHF"),
+    ("KRW", "KRW"),
+    ("INR", "INR"),
+    ("THB", "THB"),
+    ("TWD", "TWD"),
+    ("NT$", "TWD"),
+)
+
+_SYMBOL_CURRENCY_MARKERS = (
+    ("¥", "JPY"),
+    ("円", "JPY"),
+    ("€", "EUR"),
+    ("£", "GBP"),
+    ("₩", "KRW"),
+    ("₹", "INR"),
+    ("฿", "THB"),
+    ("$", "USD"),
 )
 
 
@@ -58,16 +90,35 @@ def sanitize_filename_component(value: str | None, fallback: str = "unknown") ->
     return text[:60] or fallback
 
 
+def detect_currency(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value)
+    upper = normalized.upper()
+
+    for marker, code in _ALPHA_CURRENCY_MARKERS:
+        if marker.upper() in upper:
+            return code
+
+    for marker, code in _SYMBOL_CURRENCY_MARKERS:
+        if marker in normalized:
+            return code
+
+    return ""
+
+
 def format_amount(value: str | None) -> str:
     if not value:
         return "unknown-amount"
+
     normalized = unicodedata.normalize("NFKC", value).replace(",", "").strip()
-    digits = re.sub(r"[^\d.]", "", normalized)
-    if not digits:
+    currency = detect_currency(normalized)
+    match = re.search(r"\d+(?:\.\d+)?", normalized)
+    if not match:
         return sanitize_filename_component(normalized, "unknown-amount")
-    if "." in digits:
-        return f"{digits.rstrip('0').rstrip('.')}円"
-    return f"{digits}円"
+    amount = match.group(0)
+
+    if currency:
+        return f"{currency}{amount}"
+    return sanitize_filename_component(amount, "unknown-amount")
 
 
 def analysis_tokens(analysis: AnalysisResult) -> dict[str, str]:
@@ -77,6 +128,7 @@ def analysis_tokens(analysis: AnalysisResult) -> dict[str, str]:
         "document_type": sanitize_filename_component(analysis.document_type, "other"),
         "amount": format_amount(analysis.amount),
         "title": sanitize_filename_component(analysis.title, "untitled"),
+        "description": sanitize_filename_component(analysis.description, "no-description"),
     }
 
 
@@ -102,6 +154,7 @@ def build_proposed_filename(
 ) -> str:
     normalized_template = normalize_template(template)
     token_map = analysis_tokens(analysis)
+
     def replace_token(match: re.Match[str]) -> str:
         return token_map.get(match.group(1), "unknown")
 
