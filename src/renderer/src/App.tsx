@@ -1,4 +1,28 @@
 import {
+  CheckCircledIcon,
+  CrossCircledIcon,
+  ExternalLinkIcon,
+  FileIcon,
+  InfoCircledIcon,
+  MixerHorizontalIcon,
+  OpenInNewWindowIcon,
+  PlusIcon,
+  ReloadIcon,
+  TrashIcon,
+} from '@radix-ui/react-icons';
+import {
+  Badge,
+  Button,
+  Card,
+  Checkbox,
+  Code,
+  IconButton,
+  ScrollArea,
+  Select,
+  Text,
+  TextField,
+} from '@radix-ui/themes';
+import {
   startTransition,
   useDeferredValue,
   useEffect,
@@ -13,7 +37,13 @@ import {
   normalizeTemplate,
   validateTemplate,
 } from '@shared/naming';
-import { DEFAULT_TEMPLATE, STATUS_LABELS, type AppSettings, type Diagnostics, type DocumentItem } from '@shared/types';
+import {
+  DEFAULT_TEMPLATE,
+  STATUS_LABELS,
+  type AppSettings,
+  type Diagnostics,
+  type DocumentItem,
+} from '@shared/types';
 
 declare global {
   interface Window {
@@ -21,7 +51,15 @@ declare global {
   }
 }
 
-type BusyAction = 'loading' | 'saving-settings' | 'loading-models' | 'analyzing' | 'retrying' | 'renaming' | 'skipping' | null;
+type BusyAction =
+  | 'loading'
+  | 'saving-settings'
+  | 'loading-models'
+  | 'analyzing'
+  | 'retrying'
+  | 'renaming'
+  | 'skipping'
+  | null;
 
 const EMPTY_SETTINGS: AppSettings = {
   namingTemplate: DEFAULT_TEMPLATE,
@@ -38,6 +76,8 @@ const EMPTY_DIAGNOSTICS: Diagnostics = {
   supportedExtensions: [],
 };
 
+const TEMPLATE_TOKENS = ['{date}', '{issuer_name}', '{document_type}', '{amount}', '{title}', '{description}'];
+
 export default function App() {
   const api = window.desktopApi;
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
@@ -49,8 +89,8 @@ export default function App() {
   const [modelOptions, setModelOptions] = useState<string[]>([]);
   const [diagnostics, setDiagnostics] = useState<Diagnostics>(EMPTY_DIAGNOSTICS);
   const [busyAction, setBusyAction] = useState<BusyAction>('loading');
-  const [notice, setNotice] = useState<string>('');
-  const [error, setError] = useState<string>('');
+  const [notice, setNotice] = useState('');
+  const [error, setError] = useState('');
   const [isDropActive, setIsDropActive] = useState(false);
   const deferredDocuments = useDeferredValue(documents);
 
@@ -100,7 +140,7 @@ export default function App() {
           setModelOptions(nextModels);
         });
       } catch {
-        // Keep manual input usable even if model lookup fails.
+        // Manual model input remains usable even if model lookup fails.
       }
     })();
 
@@ -124,72 +164,10 @@ export default function App() {
   }, [currentKey, documents]);
 
   useEffect(() => {
-    setCheckedKeys((previous) => previous.filter((key) => documents.some((item) => item.key === key)));
+    setCheckedKeys((previous) =>
+      previous.filter((key) => documents.some((item) => item.key === key)),
+    );
   }, [documents]);
-
-  const currentDocument = useMemo(
-    () => deferredDocuments.find((item) => item.key === currentKey) ?? null,
-    [currentKey, deferredDocuments],
-  );
-
-  const allChecked = documents.length > 0 && checkedKeys.length === documents.length;
-  const checkedActionKeys = useMemo(() => checkedKeys, [checkedKeys]);
-  const actionKeys = useMemo(() => {
-    if (checkedKeys.length > 0) {
-      return checkedKeys;
-    }
-    if (currentKey) {
-      return [currentKey];
-    }
-    return [];
-  }, [checkedKeys, currentKey]);
-
-  async function refreshWith(promise: Promise<DocumentItem[]>, action: BusyAction, successMessage: string, optimistic?: (items: DocumentItem[]) => DocumentItem[]) {
-    setBusyAction(action);
-    setError('');
-    setNotice('');
-    if (optimistic) {
-      startTransition(() => {
-        setDocuments((previous) => optimistic(previous));
-      });
-    }
-
-    try {
-      const nextDocuments = await promise;
-      startTransition(() => {
-        setDocuments(nextDocuments);
-        setNotice(successMessage);
-      });
-    } catch (nextError) {
-      setError(toMessage(nextError));
-    } finally {
-      setBusyAction(null);
-    }
-  }
-
-  async function handlePick() {
-    setBusyAction(null);
-    setError('');
-    setNotice('');
-    try {
-      const previousKeys = new Set(documents.map((item) => item.key));
-      const nextDocuments = await api.documents.pick();
-      const addedKeys = nextDocuments.filter((item) => !previousKeys.has(item.key)).map((item) => item.key);
-      startTransition(() => {
-        setDocuments(nextDocuments);
-        setCheckedKeys((previous) => [...new Set([...previous, ...addedKeys])]);
-        setNotice('ドキュメントを追加しました。');
-      });
-    } catch (nextError) {
-      setError(toMessage(nextError));
-    }
-  }
-
-  async function handleDrop(event: DragEvent<HTMLElement>) {
-    event.preventDefault();
-    setIsDropActive(false);
-    await handleDroppedFiles(event.dataTransfer.files);
-  }
 
   useEffect(() => {
     function onWindowDragOver(event: globalThis.DragEvent) {
@@ -223,6 +201,81 @@ export default function App() {
     };
   }, []);
 
+  const currentDocument = useMemo(
+    () => deferredDocuments.find((item) => item.key === currentKey) ?? null,
+    [currentKey, deferredDocuments],
+  );
+  const allChecked = documents.length > 0 && checkedKeys.length === documents.length;
+  const checkedActionKeys = useMemo(() => checkedKeys, [checkedKeys]);
+  const actionKeys = useMemo(() => {
+    if (checkedKeys.length > 0) {
+      return checkedKeys;
+    }
+    if (currentKey) {
+      return [currentKey];
+    }
+    return [];
+  }, [checkedKeys, currentKey]);
+  const selectedCount = checkedKeys.length;
+  const modelChoices = useMemo(
+    () => [...new Set(modelDraft ? [modelDraft, ...modelOptions] : modelOptions)],
+    [modelDraft, modelOptions],
+  );
+
+  async function refreshWith(
+    promise: Promise<DocumentItem[]>,
+    action: BusyAction,
+    successMessage: string,
+    optimistic?: (items: DocumentItem[]) => DocumentItem[],
+  ) {
+    setBusyAction(action);
+    setError('');
+    setNotice('');
+    if (optimistic) {
+      startTransition(() => {
+        setDocuments((previous) => optimistic(previous));
+      });
+    }
+
+    try {
+      const nextDocuments = await promise;
+      startTransition(() => {
+        setDocuments(nextDocuments);
+        setNotice(successMessage);
+      });
+    } catch (nextError) {
+      setError(toMessage(nextError));
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function handlePick() {
+    setBusyAction(null);
+    setError('');
+    setNotice('');
+    try {
+      const previousKeys = new Set(documents.map((item) => item.key));
+      const nextDocuments = await api.documents.pick();
+      const addedKeys = nextDocuments
+        .filter((item) => !previousKeys.has(item.key))
+        .map((item) => item.key);
+      startTransition(() => {
+        setDocuments(nextDocuments);
+        setCheckedKeys((previous) => [...new Set([...previous, ...addedKeys])]);
+        setNotice('ドキュメントを追加しました。');
+      });
+    } catch (nextError) {
+      setError(toMessage(nextError));
+    }
+  }
+
+  async function handleDrop(event: DragEvent<HTMLElement>) {
+    event.preventDefault();
+    setIsDropActive(false);
+    await handleDroppedFiles(event.dataTransfer.files);
+  }
+
   async function handleDroppedFiles(fileList: FileList) {
     const paths = Array.from(fileList)
       .map((file) => api.app.getPathForFile(file))
@@ -236,7 +289,9 @@ export default function App() {
     try {
       const previousKeys = new Set(documents.map((item) => item.key));
       const nextDocuments = await api.documents.add(paths);
-      const addedKeys = nextDocuments.filter((item) => !previousKeys.has(item.key)).map((item) => item.key);
+      const addedKeys = nextDocuments
+        .filter((item) => !previousKeys.has(item.key))
+        .map((item) => item.key);
       startTransition(() => {
         setDocuments(nextDocuments);
         setCheckedKeys((previous) => [...new Set([...previous, ...addedKeys])]);
@@ -260,7 +315,9 @@ export default function App() {
       '解析が完了しました。',
       (items) =>
         items.map((item) =>
-          checkedActionKeys.includes(item.key) ? { ...item, status: 'analyzing', errorMessage: '' } : item,
+          checkedActionKeys.includes(item.key)
+            ? { ...item, status: 'analyzing', errorMessage: '' }
+            : item,
         ),
     );
   }
@@ -275,7 +332,12 @@ export default function App() {
       api.documents.retry({ keys: checkedActionKeys }),
       'retrying',
       '再解析が完了しました。',
-      (items) => items.map((item) => (checkedActionKeys.includes(item.key) ? { ...item, status: 'analyzing', errorMessage: '' } : item)),
+      (items) =>
+        items.map((item) =>
+          checkedActionKeys.includes(item.key)
+            ? { ...item, status: 'analyzing', errorMessage: '' }
+            : item,
+        ),
     );
   }
 
@@ -283,7 +345,11 @@ export default function App() {
     if (actionKeys.length === 0) {
       return;
     }
-    await refreshWith(api.documents.rename({ keys: actionKeys }), 'renaming', 'リネームを反映しました。');
+    await refreshWith(
+      api.documents.rename({ keys: actionKeys }),
+      'renaming',
+      'リネームを反映しました。',
+    );
   }
 
   async function handleSkip() {
@@ -368,7 +434,9 @@ export default function App() {
         key: currentDocument.key,
         proposedName: value,
       });
-      setDocuments((previous) => previous.map((item) => (item.key === nextItem.key ? nextItem : item)));
+      setDocuments((previous) =>
+        previous.map((item) => (item.key === nextItem.key ? nextItem : item)),
+      );
       setNotice('候補ファイル名を更新しました。');
       setError('');
     } catch (nextError) {
@@ -377,101 +445,157 @@ export default function App() {
   }
 
   function toggleChecked(key: string) {
-    setCheckedKeys((previous) => (previous.includes(key) ? previous.filter((item) => item !== key) : [...previous, key]));
+    setCheckedKeys((previous) =>
+      previous.includes(key)
+        ? previous.filter((item) => item !== key)
+        : [...previous, key],
+    );
   }
 
   function toggleAll() {
     setCheckedKeys(allChecked ? [] : documents.map((item) => item.key));
   }
 
-  const templateTokens = useMemo(() => ['{date}', '{issuer_name}', '{document_type}', '{amount}', '{title}', '{description}'], []);
-  const selectedCount = checkedKeys.length;
-
   return (
     <main
-      className="h-screen overflow-hidden bg-[linear-gradient(180deg,_#08111b_0%,_#060c14_100%)] text-slate-50"
+      className="app-shell h-[100dvh] overflow-hidden"
       onDragOver={(event) => {
         event.preventDefault();
         setIsDropActive(true);
       }}
       onDrop={(event) => void handleDrop(event)}
     >
-      <div className="mx-auto flex h-screen max-w-[1280px] flex-col gap-3 px-3 py-3">
-        <section
-          className={`rounded-[20px] border px-4 py-3 transition ${isDropActive ? 'border-cyan-300 bg-cyan-300/10' : 'border-white/10 bg-white/[0.04]'}`}
-          onDragOver={(event) => {
-            event.preventDefault();
-            setIsDropActive(true);
-          }}
-          onDragLeave={() => setIsDropActive(false)}
-          onDrop={(event) => void handleDrop(event)}
+      <div className="mx-auto flex h-full w-full max-w-[1280px] min-w-0 flex-col gap-3 px-3 py-3">
+        <Card
+          className={`w-full border-0 bg-[color-mix(in_oklab,var(--blue-3)_18%,var(--gray-2))] shadow-[0_10px_30px_rgba(2,12,27,0.28)] transition-all ${isDropActive ? 'ring-2 ring-blue-9' : ''}`}
+          size="2"
+          variant="surface"
         >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2">
-              <ActionButton disabled={documents.length === 0 || busyAction !== null} label={busyAction === 'analyzing' ? '解析中...' : '解析'} onClick={() => void handleAnalyze()} />
-              <ActionButton disabled={actionKeys.length === 0 || busyAction !== null} label={busyAction === 'retrying' ? '再解析中...' : '再解析'} onClick={() => void handleRetry()} tone="secondary" />
-              <ActionButton disabled={actionKeys.length === 0 || busyAction !== null} label={busyAction === 'renaming' ? 'リネーム中...' : 'リネーム'} onClick={() => void handleRename()} tone="success" />
-              <ActionButton disabled={actionKeys.length === 0 || busyAction !== null} label={busyAction === 'skipping' ? '処理中...' : 'スキップ'} onClick={() => void handleSkip()} tone="muted" />
+              <ToolbarButton
+                active={busyAction === 'analyzing'}
+                disabled={documents.length === 0 || busyAction !== null}
+                label="解析"
+                onClick={() => void handleAnalyze()}
+              />
+              <ToolbarButton
+                active={busyAction === 'retrying'}
+                disabled={actionKeys.length === 0 || busyAction !== null}
+                label="再解析"
+                onClick={() => void handleRetry()}
+                variant="soft"
+              />
+              <ToolbarButton
+                active={busyAction === 'renaming'}
+                color="green"
+                disabled={actionKeys.length === 0 || busyAction !== null}
+                label="リネーム"
+                onClick={() => void handleRename()}
+                variant="solid"
+              />
+              <ToolbarButton
+                active={busyAction === 'skipping'}
+                color="gray"
+                disabled={actionKeys.length === 0 || busyAction !== null}
+                label="スキップ"
+                onClick={() => void handleSkip()}
+                variant="soft"
+              />
             </div>
-            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300">
-              <CompactBadge label="件数" value={String(documents.length)} />
-              <CompactBadge label="選択" value={String(selectedCount)} />
-              <CompactBadge label="API" value={diagnostics.apiKeyConfigured ? 'OK' : 'NG'} tone={diagnostics.apiKeyConfigured ? 'good' : 'warn'} />
-              <CompactBadge label="モデル" value={settings.openaiModel} />
+
+            <div className="flex flex-wrap items-center gap-2">
+              <MetaBadge label="件数" value={String(documents.length)} />
+              <MetaBadge label="選択" value={String(selectedCount)} />
+              <MetaBadge
+                color={diagnostics.apiKeyConfigured ? 'green' : 'amber'}
+                label="API"
+                value={diagnostics.apiKeyConfigured ? 'OK' : 'NG'}
+              />
+              <MetaBadge label="モデル" value={settings.openaiModel} />
             </div>
           </div>
-        </section>
+        </Card>
 
-        <section className="grid min-h-0 flex-1 gap-3 xl:grid-cols-[320px_minmax(0,1fr)_300px]">
-          <div className="flex min-h-0 flex-col rounded-[20px] border border-white/10 bg-white/[0.035] p-3">
-            <div className="mb-3 flex items-center justify-between">
+        <section className="grid min-h-0 flex-1 gap-3 xl:grid-cols-[300px_minmax(0,1fr)_288px]">
+          <Card className="flex min-h-0 flex-col overflow-hidden" size="2" variant="surface">
+            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--gray-a5)] pb-3">
               <div className="flex items-center gap-2">
-                <div className="text-sm font-medium text-white">ファイル</div>
-                <ActionButton compact label="追加" onClick={() => void handlePick()} tone="secondary" />
-                <ActionButton compact label="クリア" onClick={() => void handleClear()} tone="secondary" />
+                <Text size="2" weight="medium">
+                  ファイル
+                </Text>
+                <IconButton
+                  aria-label="ファイルを追加"
+                  color="gray"
+                  onClick={() => void handlePick()}
+                  size="1"
+                  variant="soft"
+                >
+                  <PlusIcon />
+                </IconButton>
+                <IconButton
+                  aria-label="一覧をクリア"
+                  color="gray"
+                  onClick={() => void handleClear()}
+                  size="1"
+                  variant="soft"
+                >
+                  <TrashIcon />
+                </IconButton>
               </div>
-              <label className="flex items-center gap-2 text-xs text-slate-400">
-                <input checked={allChecked} onChange={toggleAll} type="checkbox" />
-                すべて
-              </label>
+              <div className="flex items-center gap-2">
+                <Checkbox checked={allChecked} onCheckedChange={toggleAll} />
+                <Text color="gray" size="1">
+                  すべて
+                </Text>
+              </div>
             </div>
 
-            <div className="flex-1 overflow-auto">
+            <ScrollArea className="mt-3 min-h-0 flex-1" scrollbars="vertical" type="auto">
               {documents.length === 0 ? (
                 <EmptyState />
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-2 pb-1 pr-2">
                   {documents.map((item) => (
                     <button
                       key={item.key}
                       className={`w-full rounded-[16px] border p-3 text-left transition ${
                         currentKey === item.key
-                          ? 'border-cyan-300/70 bg-cyan-400/10'
-                          : 'border-white/8 bg-white/[0.03] hover:border-white/16 hover:bg-white/[0.05]'
+                          ? 'border-blue-8 bg-blue-3 shadow-[inset_0_0_0_1px_var(--blue-8)]'
+                          : 'border-[var(--gray-a5)] bg-[var(--gray-a2)] hover:border-[var(--gray-a7)] hover:bg-[var(--gray-a3)]'
                       }`}
                       onClick={() => setCurrentKey(item.key)}
                       onDoubleClick={() => void api.documents.open(item.key)}
                       type="button"
                     >
                       <div className="flex items-start gap-3">
-                        <input
-                          checked={checkedKeys.includes(item.key)}
-                          className="mt-1"
-                          onChange={() => toggleChecked(item.key)}
+                        <div
+                          className="pt-0.5"
                           onClick={(event) => event.stopPropagation()}
-                          type="checkbox"
-                        />
+                          onPointerDown={(event) => event.stopPropagation()}
+                        >
+                          <Checkbox
+                            checked={checkedKeys.includes(item.key)}
+                            onCheckedChange={() => toggleChecked(item.key)}
+                          />
+                        </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
-                            <StatusPill status={item.status} />
-                            <span className="text-[11px] text-slate-500">{item.analysis ? `${Math.round(item.analysis.confidence * 100)}%` : '-'}</span>
+                            <StatusBadge status={item.status} />
+                            <Text color="gray" size="1">
+                              {item.analysis ? `${Math.round(item.analysis.confidence * 100)}%` : '-'}
+                            </Text>
                           </div>
-                          <p className="mt-2 truncate text-sm font-medium text-white">{item.displayName}</p>
-                          <p className="mt-1 truncate text-[11px] text-slate-400">{item.proposedName || '候補名なし'}</p>
+                          <Text as="p" className="mt-2 truncate" size="2" weight="medium">
+                            {item.displayName}
+                          </Text>
+                          <Text as="p" className="mt-1 truncate" color="gray" size="1">
+                            {item.proposedName || '候補名なし'}
+                          </Text>
                           {item.errorMessage ? (
-                            <p className="mt-2 cursor-text select-text whitespace-pre-wrap text-[11px] text-rose-300">
+                            <Text as="p" className="mt-2 cursor-text select-text whitespace-pre-wrap" color="red" size="1">
                               {item.errorMessage}
-                            </p>
+                            </Text>
                           ) : null}
                         </div>
                       </div>
@@ -479,27 +603,51 @@ export default function App() {
                   ))}
                 </div>
               )}
-            </div>
-          </div>
+            </ScrollArea>
+          </Card>
 
-          <div className="flex min-h-0 flex-col overflow-hidden rounded-[20px] border border-white/10 bg-white/[0.035] p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="truncate text-sm font-medium text-white">{currentDocument?.displayName ?? 'ドキュメントを選択してください'}</div>
-                <div className="mt-1 truncate text-[11px] text-slate-500" title={currentDocument?.currentPath ?? ''}>
+          <Card className="flex min-h-0 flex-col overflow-hidden" size="2" variant="surface">
+            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-[var(--gray-a5)] pb-3">
+              <div className="min-w-0 flex-1">
+                <Text as="p" className="truncate" size="2" weight="medium">
+                  {currentDocument?.displayName ?? 'ドキュメントを選択してください'}
+                </Text>
+                <Text
+                  as="p"
+                  className="mt-1 truncate"
+                  color="gray"
+                  size="1"
+                  title={currentDocument?.currentPath ?? ''}
+                >
                   {currentDocument ? compactPath(currentDocument.currentPath) : '未選択'}
-                </div>
+                </Text>
               </div>
               {currentDocument ? (
-                <div className="flex gap-2">
-                  <GhostButton label="開く" onClick={() => void api.documents.open(currentDocument.key)} />
-                  <GhostButton label="場所" onClick={() => void api.documents.reveal(currentDocument.key)} />
+                <div className="flex shrink-0 items-center gap-2">
+                  <Button
+                    color="gray"
+                    onClick={() => void api.documents.open(currentDocument.key)}
+                    size="1"
+                    variant="soft"
+                  >
+                    <OpenInNewWindowIcon />
+                    開く
+                  </Button>
+                  <Button
+                    color="gray"
+                    onClick={() => void api.documents.reveal(currentDocument.key)}
+                    size="1"
+                    variant="soft"
+                  >
+                    <ExternalLinkIcon />
+                    場所
+                  </Button>
                 </div>
               ) : null}
             </div>
 
-            <div className="mt-3 min-h-0 flex-1 overflow-auto pr-1">
-              <div className="grid gap-3">
+            <ScrollArea className="mt-3 min-h-0 flex-1 pr-1" scrollbars="vertical" type="auto">
+              <div className="grid gap-3 pb-4 pr-3">
                 <div className="grid gap-2 md:grid-cols-2">
                   <StatusInfoCard status={currentDocument?.status ?? null} />
                   <InfoCard label="confidence" value={currentDocument?.analysis ? currentDocument.analysis.confidence.toFixed(2) : '-'} />
@@ -511,210 +659,314 @@ export default function App() {
                   <InfoCard label="内容" value={currentDocument?.analysis?.description ?? '-'} />
                 </div>
 
-                <div className="rounded-[16px] border border-white/10 bg-black/20 p-3">
-                  <div className="text-xs text-slate-400">候補ファイル名</div>
-                  <input
-                    className="mt-2 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2.5 text-sm text-white outline-none transition focus:border-cyan-300"
-                    disabled={!currentDocument}
-                    key={currentDocument?.key ?? 'empty'}
-                    defaultValue={currentDocument?.proposedName ?? ''}
-                    onBlur={(event) => void handleProposedNameSave(event.currentTarget.value)}
-                    placeholder="解析後に候補ファイル名が入ります"
+                <Card size="2" variant="surface">
+                  <div className="grid gap-2">
+                    <Text color="gray" size="1">
+                      候補ファイル名
+                    </Text>
+                    <TextField.Root
+                      defaultValue={currentDocument?.proposedName ?? ''}
+                      disabled={!currentDocument}
+                      key={currentDocument?.key ?? 'empty'}
+                      onBlur={(event) => void handleProposedNameSave(event.currentTarget.value)}
+                      placeholder="解析後に候補ファイル名が入ります"
+                      size="2"
+                      variant="surface"
+                    />
+                    <Text as="p" color="gray" size="1">
+                      保存はフォーカスを外したタイミングで反映されます。
+                    </Text>
+                  </div>
+                </Card>
+
+                <Card size="2" variant="surface">
+                  <div className="mb-2 flex items-center gap-2">
+                    <FileIcon />
+                    <Text color="gray" size="1">
+                      JSON
+                    </Text>
+                  </div>
+                  <ScrollArea
+                    className="h-[340px] rounded-[12px] border border-[var(--gray-a5)] bg-[var(--gray-a2)] [scrollbar-gutter:stable_both-edges]"
+                    scrollbars="vertical"
+                    type="auto"
+                  >
+                    <pre className="min-h-full cursor-text select-text whitespace-pre-wrap break-all px-2 py-3 font-mono text-[11px] leading-5 text-[var(--gray-12)]">
+                      {currentDocument?.analysis
+                        ? JSON.stringify(currentDocument.analysis, null, 2)
+                        : currentDocument?.errorMessage || '解析結果はここに表示されます。'}
+                    </pre>
+                  </ScrollArea>
+                </Card>
+              </div>
+            </ScrollArea>
+          </Card>
+
+          <Card className="flex min-h-0 flex-col overflow-hidden" size="2" variant="surface">
+            <div className="flex shrink-0 items-center gap-2 border-b border-[var(--gray-a5)] pb-3">
+              <MixerHorizontalIcon />
+              <Text size="2" weight="medium">
+                設定
+              </Text>
+            </div>
+            <ScrollArea className="mt-3 min-h-0 flex-1 pr-1" scrollbars="vertical" type="auto">
+              <div className="grid gap-3 pb-4 pr-3">
+                <div className="grid gap-2.5">
+                  <Text className="leading-none" color="gray" size="1">
+                    モデル
+                  </Text>
+                  <Select.Root onValueChange={setModelDraft} value={modelDraft}>
+                    <Select.Trigger className="w-full" radius="large" variant="surface" />
+                    <Select.Content position="popper" variant="soft">
+                      {modelChoices.map((model) => (
+                        <Select.Item key={model} value={model}>
+                          {model}
+                        </Select.Item>
+                      ))}
+                    </Select.Content>
+                  </Select.Root>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    color="gray"
+                    disabled={busyAction !== null}
+                    onClick={() => void handleLoadModels()}
+                    size="2"
+                    variant="soft"
+                  >
+                    {busyAction === 'loading-models' ? <ReloadIcon className="animate-spin" /> : <ReloadIcon />}
+                    一覧
+                  </Button>
+                  <Button
+                    disabled={busyAction !== null}
+                    onClick={() => void handleSaveSettings()}
+                    size="2"
+                    variant="solid"
+                  >
+                    {busyAction === 'saving-settings' ? <ReloadIcon className="animate-spin" /> : <MixerHorizontalIcon />}
+                    保存
+                  </Button>
+                </div>
+
+                <div className="grid gap-2">
+                  <Text as="label" color="gray" size="1">
+                    命名テンプレート
+                  </Text>
+                  <TextField.Root
+                    onChange={(event) => setTemplateDraft(event.currentTarget.value)}
+                    placeholder={DEFAULT_TEMPLATE}
+                    size="2"
+                    value={templateDraft}
+                    variant="surface"
                   />
-                  <p className="mt-2 text-[11px] text-slate-500">保存はフォーカスを外したタイミングで反映されます。</p>
                 </div>
 
-                <div className="overflow-hidden rounded-[16px] border border-white/10 bg-black/18 p-3">
-                  <div className="mb-2 text-xs text-slate-400">JSON</div>
-                  <pre className="min-h-[280px] max-h-[420px] overflow-auto whitespace-pre-wrap break-all rounded-xl bg-black/25 p-3 text-[11px] leading-5 text-cyan-100">
-                    {currentDocument?.analysis ? JSON.stringify(currentDocument.analysis, null, 2) : currentDocument?.errorMessage || '解析結果はここに表示されます。'}
-                  </pre>
+                <ScrollArea scrollbars="horizontal" type="auto">
+                  <div className="flex min-w-max items-center gap-2 pb-1">
+                    {TEMPLATE_TOKENS.map((token) => (
+                      <Badge key={token} color="gray" radius="full" size="1" variant="soft">
+                        {token}
+                      </Badge>
+                    ))}
+                  </div>
+                </ScrollArea>
+
+                <div className="grid gap-2">
+                  <CompactInfo
+                    label="API Key"
+                    value={diagnostics.apiKeyConfigured ? '検出済み' : '未設定'}
+                  />
+                  <CompactInfo label=".env" value={diagnostics.envPath ?? '未検出'} />
+                  <CompactInfo label="設定" value={diagnostics.settingsPath || '-'} />
                 </div>
               </div>
-            </div>
-          </div>
-
-          <div className="flex min-h-0 flex-col gap-3 overflow-hidden rounded-[20px] border border-white/10 bg-white/[0.035] p-4">
-            <label className="block text-xs text-slate-400">
-              モデル
-              <select
-                className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-cyan-300"
-                onChange={(event) => setModelDraft(event.currentTarget.value)}
-                value={modelDraft}
-              >
-                {modelOptions.length === 0 ? <option value={modelDraft}>{modelDraft}</option> : null}
-                {!modelOptions.includes(modelDraft) && modelOptions.length > 0 ? <option value={modelDraft}>{modelDraft}</option> : null}
-                {modelOptions.map((model) => (
-                  <option key={model} value={model}>
-                    {model}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <div className="flex gap-2">
-              <ActionButton disabled={busyAction !== null} label={busyAction === 'loading-models' ? '取得中...' : '一覧'} onClick={() => void handleLoadModels()} tone="secondary" />
-              <ActionButton disabled={busyAction !== null} label={busyAction === 'saving-settings' ? '保存中...' : '保存'} onClick={() => void handleSaveSettings()} />
-            </div>
-
-            <label className="block text-xs text-slate-400">
-              命名テンプレート
-              <input
-                className="mt-1 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white outline-none transition focus:border-cyan-300"
-                onChange={(event) => setTemplateDraft(event.currentTarget.value)}
-                placeholder={DEFAULT_TEMPLATE}
-                value={templateDraft}
-              />
-            </label>
-
-            <div className="overflow-x-auto pb-1">
-              <div className="flex min-w-max gap-1.5">
-                {templateTokens.map((token) => (
-                  <span key={token} className="rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-1 text-[10px] text-slate-300">
-                    {token}
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            <div className="grid gap-2 text-[11px] text-slate-400">
-              <CompactInfo label="API Key" value={diagnostics.apiKeyConfigured ? '検出済み' : '未設定'} />
-              <CompactInfo label=".env" value={diagnostics.envPath ?? '未検出'} />
-              <CompactInfo label="設定" value={diagnostics.settingsPath || '-'} />
-            </div>
-          </div>
+            </ScrollArea>
+          </Card>
         </section>
 
-        <footer className="grid gap-2 rounded-[16px] border border-white/10 bg-black/20 px-4 py-2 text-xs text-slate-300 lg:grid-cols-[1fr_auto] lg:items-center">
-          <div>
-            {error ? <p className="cursor-text select-text whitespace-pre-wrap text-rose-300">{error}</p> : null}
-            {!error && notice ? <p className="cursor-text select-text whitespace-pre-wrap text-emerald-300">{notice}</p> : null}
-            {!error && !notice ? <p className="cursor-text select-text whitespace-pre-wrap text-slate-400">チェック済みがあればそれを優先、なければ選択中の1件を処理します。</p> : null}
-          </div>
-          <div className="text-[11px] text-slate-500">{diagnostics.logPath || '-'}</div>
-        </footer>
+        <StatusCallout error={error} logPath={diagnostics.logPath || '-'} notice={notice} />
       </div>
     </main>
   );
 }
 
-function ActionButton(props: {
+function ToolbarButton(props: {
   label: string;
   onClick: () => void;
-  tone?: 'primary' | 'secondary' | 'success' | 'muted';
+  variant?: 'solid' | 'soft';
+  color?: 'blue' | 'gray' | 'green';
   disabled?: boolean;
-  compact?: boolean;
+  active?: boolean;
 }) {
-  const tone =
-    props.tone === 'secondary'
-      ? 'bg-white/10 text-white hover:bg-white/16'
-      : props.tone === 'success'
-        ? 'bg-emerald-400 text-slate-950 hover:bg-emerald-300'
-        : props.tone === 'muted'
-          ? 'bg-slate-600 text-white hover:bg-slate-500'
-          : 'bg-cyan-300 text-slate-950 hover:bg-cyan-200';
-
   return (
-    <button
-      className={`rounded-xl font-medium transition disabled:cursor-not-allowed disabled:bg-white/8 disabled:text-slate-500 ${
-        props.compact ? 'min-w-[56px] px-2 py-1 text-[11px]' : 'min-w-[92px] px-3 py-2 text-sm'
-      } ${tone}`}
+    <Button
+      className="min-w-[96px] justify-center"
+      color={props.color ?? 'blue'}
       disabled={props.disabled}
       onClick={props.onClick}
-      type="button"
+      size="2"
+      variant={props.variant ?? 'solid'}
     >
+      {props.active ? <ReloadIcon className="animate-spin" /> : null}
       {props.label}
-    </button>
+    </Button>
   );
 }
 
-function GhostButton(props: { label: string; onClick: () => void }) {
+function MetaBadge(props: { label: string; value: string; color?: 'gray' | 'green' | 'amber' }) {
   return (
-    <button
-      className="rounded-lg border border-white/12 bg-white/6 px-3 py-1.5 text-[11px] text-slate-200 transition hover:border-white/25 hover:bg-white/10"
-      onClick={props.onClick}
-      type="button"
-    >
-      {props.label}
-    </button>
+    <div className="flex items-center gap-1 rounded-full border border-[var(--gray-a5)] bg-[var(--gray-a2)] px-2.5 py-1">
+      <Text color="gray" size="1">
+        {props.label}
+      </Text>
+      <Badge color={props.color ?? 'gray'} radius="full" size="1" variant="soft">
+        {props.value}
+      </Badge>
+    </div>
   );
 }
 
-function StatusPill({ status }: { status: DocumentItem['status'] }) {
-  const classes: Record<DocumentItem['status'], string> = {
-    pending: 'bg-slate-500/20 text-slate-200',
-    analyzing: 'bg-cyan-300/20 text-cyan-100',
-    ready: 'bg-emerald-400/20 text-emerald-100',
-    needs_review: 'bg-amber-300/20 text-amber-100',
-    skipped: 'bg-slate-400/20 text-slate-200',
-    renamed: 'bg-emerald-500/25 text-emerald-100',
-    error: 'bg-rose-400/20 text-rose-100',
-  };
-
-  return <span className={`rounded-full px-3 py-1 text-[11px] font-semibold tracking-[0.22em] uppercase ${classes[status]}`}>{STATUS_LABELS[status]}</span>;
+function StatusBadge({ status }: { status: DocumentItem['status'] }) {
+  return (
+    <Badge color={statusColor(status)} radius="full" size="1" variant="soft">
+      {STATUS_LABELS[status]}
+    </Badge>
+  );
 }
 
 function InfoCard(props: { label: string; value: string }) {
   return (
-    <div className="rounded-[14px] border border-white/8 bg-black/18 p-3">
-      <p className="text-[10px] text-slate-500">{props.label}</p>
-      <p className="mt-1 text-sm leading-5 text-white">{props.value}</p>
-    </div>
+    <Card size="1" variant="surface">
+      <div className="grid gap-1">
+        <Text color="gray" size="1">
+          {props.label}
+        </Text>
+        <Text as="p" className="leading-5" size="2">
+          {props.value}
+        </Text>
+      </div>
+    </Card>
   );
 }
 
 function StatusInfoCard(props: { status: DocumentItem['status'] | null }) {
   const status = props.status;
-  const tone =
-    status === 'ready'
-      ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-100'
-      : status === 'analyzing'
-        ? 'border-cyan-300/30 bg-cyan-300/10 text-cyan-100'
-        : status === 'needs_review'
-          ? 'border-amber-300/30 bg-amber-300/10 text-amber-100'
-          : status === 'error'
-            ? 'border-rose-400/30 bg-rose-400/10 text-rose-100'
-            : status === 'renamed'
-              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100'
-              : status === 'skipped'
-                ? 'border-slate-400/20 bg-slate-400/10 text-slate-200'
-                : 'border-white/10 bg-white/[0.03] text-slate-200';
-
   return (
-    <div className={`rounded-[14px] border p-3 ${tone}`}>
-      <p className="text-[10px] text-inherit/70">状態</p>
-      <p className="mt-1 text-sm font-medium leading-5">{status ? STATUS_LABELS[status] : '-'}</p>
-    </div>
-  );
-}
-
-function CompactBadge(props: { label: string; value: string; tone?: 'good' | 'warn' }) {
-  return (
-    <div className="rounded-full border border-white/10 bg-black/20 px-2.5 py-1">
-      <span className="mr-1 text-[10px] text-slate-500">{props.label}</span>
-      <span className={`text-[11px] ${props.tone === 'good' ? 'text-emerald-200' : props.tone === 'warn' ? 'text-amber-200' : 'text-white'}`}>{props.value}</span>
-    </div>
+    <Card
+      className={`${status ? statusSurfaceClass(status) : ''}`}
+      size="1"
+      variant="surface"
+    >
+      <div className="grid gap-1">
+        <Text color="gray" size="1">
+          状態
+        </Text>
+        <Text as="p" size="2" weight="medium">
+          {status ? STATUS_LABELS[status] : '-'}
+        </Text>
+      </div>
+    </Card>
   );
 }
 
 function EmptyState() {
   return (
-    <div className="grid h-full place-items-center rounded-[16px] border border-dashed border-white/12 bg-black/10 p-6 text-center">
-      <div>
-        <p className="text-xs text-slate-500">ファイルを追加してください</p>
-        <p className="mt-2 text-sm text-slate-300">PDF または画像をここにドロップできます。</p>
+    <Card className="grid min-h-[240px] place-items-center border border-dashed" size="2" variant="surface">
+      <div className="grid gap-2 text-center">
+        <Text color="gray" size="1">
+          ファイルを追加してください
+        </Text>
+        <Text as="p" size="2">
+          PDF または画像をここにドロップできます。
+        </Text>
       </div>
-    </div>
+    </Card>
   );
 }
 
 function CompactInfo(props: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-white/8 bg-black/18 px-3 py-2">
-      <div className="text-[10px] text-slate-500">{props.label}</div>
-      <div className="mt-0.5 break-all text-[11px] text-slate-300">{props.value}</div>
-    </div>
+    <Card size="1" variant="surface">
+      <div className="grid gap-1">
+        <Text color="gray" size="1">
+          {props.label}
+        </Text>
+        <Code className="block break-all whitespace-pre-wrap" size="1" variant="ghost">
+          {props.value}
+        </Code>
+      </div>
+    </Card>
   );
+}
+
+function StatusCallout(props: { error: string; notice: string; logPath: string }) {
+  const isError = Boolean(props.error);
+  const isNotice = Boolean(props.notice);
+  const icon = isError ? <CrossCircledIcon /> : isNotice ? <CheckCircledIcon /> : <InfoCircledIcon />;
+  const toneClass = isError
+    ? 'border-[color-mix(in_oklab,var(--red-8)_35%,transparent)] bg-[color-mix(in_oklab,var(--red-3)_55%,transparent)] text-[var(--red-11)]'
+    : isNotice
+      ? 'border-[color-mix(in_oklab,var(--green-8)_32%,transparent)] bg-[color-mix(in_oklab,var(--green-3)_55%,transparent)] text-[var(--green-11)]'
+      : 'border-[var(--gray-a5)] bg-[var(--gray-a2)] text-[var(--gray-11)]';
+  const message =
+    props.error ||
+    props.notice ||
+    'チェック済みがあればそれを優先、なければ選択中の1件を処理します。';
+
+  return (
+    <Card className={`shrink-0 py-1 ${toneClass}`} size="1" variant="surface">
+      <div className="flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="shrink-0 leading-none">{icon}</span>
+          <Text className="cursor-text select-text whitespace-pre-wrap leading-[18px]" size="1">
+            {message}
+          </Text>
+        </div>
+        <Code className="leading-[18px]" size="1" variant="ghost">
+          {props.logPath}
+        </Code>
+      </div>
+    </Card>
+  );
+}
+
+function statusColor(status: DocumentItem['status']): 'gray' | 'blue' | 'green' | 'amber' | 'red' {
+  switch (status) {
+    case 'analyzing':
+      return 'blue';
+    case 'ready':
+    case 'renamed':
+      return 'green';
+    case 'needs_review':
+      return 'amber';
+    case 'error':
+      return 'red';
+    case 'pending':
+    case 'skipped':
+    default:
+      return 'gray';
+  }
+}
+
+function statusSurfaceClass(status: DocumentItem['status']): string {
+  switch (status) {
+    case 'ready':
+      return 'bg-[color-mix(in_oklab,var(--green-3)_72%,transparent)]';
+    case 'analyzing':
+      return 'bg-[color-mix(in_oklab,var(--blue-3)_72%,transparent)]';
+    case 'needs_review':
+      return 'bg-[color-mix(in_oklab,var(--amber-3)_72%,transparent)]';
+    case 'error':
+      return 'bg-[color-mix(in_oklab,var(--red-3)_72%,transparent)]';
+    case 'renamed':
+      return 'bg-[color-mix(in_oklab,var(--green-4)_72%,transparent)]';
+    case 'skipped':
+      return 'bg-[color-mix(in_oklab,var(--gray-3)_72%,transparent)]';
+    case 'pending':
+    default:
+      return '';
+  }
 }
 
 function toMessage(error: unknown): string {
