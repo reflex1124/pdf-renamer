@@ -1,1 +1,0 @@
-"""PDF renamer application package."""

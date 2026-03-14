@@ -1,6 +1,10 @@
 .venv/
 __pycache__/
-app/__pycache__/
+node_modules/
+.astro/
+dist/
+coverage/
+release/
 logs/
 .env
 config/settings.json
