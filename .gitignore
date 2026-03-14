@@ -3,6 +3,7 @@ __pycache__/
 node_modules/
 .astro/
 dist/
+out/
 coverage/
 release/
 logs/

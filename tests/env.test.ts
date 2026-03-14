@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { loadEnvironment, resolveEnvFileCandidates } from '../electron/services/env.js';
+import { loadEnvironment, resolveEnvFileCandidates } from '../src/main/services/env.js';
 
 const originalApiKey = process.env.OPENAI_API_KEY;
 

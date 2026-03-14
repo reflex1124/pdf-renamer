@@ -1,6 +1,10 @@
 {
   "compilerOptions": {
     "target": "ES2023",
+    "lib": [
+      "ES2023",
+      "DOM"
+    ],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "strict": true,
@@ -11,11 +15,27 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "jsx": "react-jsx",
+    "types": [
+      "node",
+      "electron",
+      "vitest/globals"
+    ],
     "baseUrl": ".",
     "paths": {
       "@shared/*": [
         "shared/*"
+      ],
+      "@renderer/*": [
+        "src/renderer/src/*"
       ]
     }
-  }
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "shared/**/*.ts",
+    "tests/**/*.ts",
+    "electron.vite.config.ts",
+    "vitest.config.ts"
+  ]
 }

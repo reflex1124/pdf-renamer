@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { DEFAULT_TEMPLATE, type AppSettings } from '../../shared/types.js';
+import { DEFAULT_TEMPLATE, type AppSettings } from '../../../shared/types.js';
 
 export const DEFAULT_SETTINGS: AppSettings = {
   namingTemplate: DEFAULT_TEMPLATE,

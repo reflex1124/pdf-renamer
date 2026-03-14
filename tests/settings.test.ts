@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULT_SETTINGS, SettingsStore } from '../electron/services/settings.js';
+import { DEFAULT_SETTINGS, SettingsStore } from '../src/main/services/settings.js';
 
 describe('settings store', () => {
   it('returns defaults when the settings file is missing', async () => {

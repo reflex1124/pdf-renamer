@@ -12,12 +12,12 @@ import {
   ensureExtension,
   normalizeTemplate,
   validateTemplate,
-} from '../../../shared/naming';
-import { DEFAULT_TEMPLATE, STATUS_LABELS, type AppSettings, type Diagnostics, type DocumentItem } from '../../../shared/types';
+} from '@shared/naming';
+import { DEFAULT_TEMPLATE, STATUS_LABELS, type AppSettings, type Diagnostics, type DocumentItem } from '@shared/types';
 
 declare global {
   interface Window {
-    desktopApi: import('../../../shared/types').DesktopApi;
+    desktopApi: import('@shared/types').DesktopApi;
   }
 }
 
@@ -224,7 +224,7 @@ export default function App() {
   }, []);
 
   async function handleDroppedFiles(fileList: FileList) {
-    const paths = [...fileList]
+    const paths = Array.from(fileList)
       .map((file) => api.app.getPathForFile(file))
       .filter(Boolean);
 

@@ -1,6 +1,6 @@
 # PDF Renamer
 
-Electron + Astro で作ったデスクトップ GUI アプリです。PDF や画像をドラッグ&ドロップし、OpenAI API で内容を解析して、安全な候補ファイル名を提案し、確認後にローカルファイルをリネームします。
+Electron-vite + React で作ったデスクトップ GUI アプリです。PDF や画像をドラッグ&ドロップし、OpenAI API で内容を解析して、安全な候補ファイル名を提案し、確認後にローカルファイルをリネームします。
 
 ## Setup
 
@@ -42,6 +42,12 @@ npm test
 
 ```bash
 npm run build
+```
+
+プレビュー起動:
+
+```bash
+npm run preview
 ```
 
 配布ビルド:

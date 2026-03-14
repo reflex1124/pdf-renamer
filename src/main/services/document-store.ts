@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import type { AnalysisResult, DocumentItem, ItemStatus } from '../../shared/types.js';
+import type { AnalysisResult, DocumentItem, ItemStatus } from '../../../shared/types.js';
 
 type StoredDocument = Omit<DocumentItem, 'displayName'>;
 

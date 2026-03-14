@@ -8,7 +8,7 @@ import { DocumentController } from './services/document-controller.js';
 import { Logger } from './services/logger.js';
 import { OpenAiDocumentAnalyzer } from './services/openai-analyzer.js';
 import { SettingsStore } from './services/settings.js';
-import { SUPPORTED_DOCUMENT_EXTENSIONS, type AnalyzeDocumentsRequest, type Diagnostics, type SaveSettingsInput } from '../shared/types.js';
+import { SUPPORTED_DOCUMENT_EXTENSIONS, type AnalyzeDocumentsRequest, type Diagnostics, type SaveSettingsInput } from '../../shared/types.js';
 
 let mainWindow: BrowserWindow | null = null;
 let controller: DocumentController | null = null;
@@ -62,18 +62,18 @@ async function createWindow(): Promise<void> {
     title: 'PDF Renamer',
     backgroundColor: '#06121c',
     webPreferences: {
-      preload: path.join(moduleDir, 'preload.js'),
+      preload: path.join(moduleDir, '../preload/index.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
     },
   });
 
-  if (!app.isPackaged) {
-    await mainWindow.loadURL('http://127.0.0.1:4321');
+  if (process.env.ELECTRON_RENDERER_URL) {
+    await mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
-    await mainWindow.loadFile(path.resolve(moduleDir, '../../renderer/index.html'));
+    await mainWindow.loadFile(path.resolve(moduleDir, '../renderer/index.html'));
   }
 }
 

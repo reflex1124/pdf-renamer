@@ -8,7 +8,7 @@ import type { ResponseCreateParamsNonStreaming, ResponseInputContent, ResponseIn
 import { PDFParse } from 'pdf-parse';
 import { z } from 'zod';
 
-import type { AnalysisResult } from '../../shared/types.js';
+import type { AnalysisResult } from '../../../shared/types.js';
 
 const SNAPSHOT_SUFFIX = /-\d{4}-\d{2}-\d{2}$/;
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif']);

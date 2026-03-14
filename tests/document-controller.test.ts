@@ -4,9 +4,9 @@ import path from 'node:path';
 
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { DocumentController } from '../electron/services/document-controller.js';
-import { Logger } from '../electron/services/logger.js';
-import { SettingsStore } from '../electron/services/settings.js';
+import { DocumentController } from '../src/main/services/document-controller.js';
+import { Logger } from '../src/main/services/logger.js';
+import { SettingsStore } from '../src/main/services/settings.js';
 import type { AnalysisResult } from '../shared/types.js';
 
 class MockAnalyzer {

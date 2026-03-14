@@ -7,13 +7,13 @@ import {
   normalizeTemplate,
   sanitizeFilenameComponent,
   validateTemplate,
-} from '../../shared/naming.js';
+} from '../../../shared/naming.js';
 import {
   SUPPORTED_DOCUMENT_EXTENSIONS,
   type AppSettings,
   type DocumentItem,
   type UpdateProposedNameRequest,
-} from '../../shared/types.js';
+} from '../../../shared/types.js';
 import type { Logger } from './logger.js';
 import type { SettingsStore } from './settings.js';
 import type { AnalyzerPort } from './openai-analyzer.js';

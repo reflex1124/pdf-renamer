@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
-import type { DesktopApi } from '../shared/types.js';
+import type { DesktopApi } from '../../shared/types.js';
 
 const api: DesktopApi = {
   settings: {
