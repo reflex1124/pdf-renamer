@@ -6,7 +6,10 @@ import OpenAI from 'openai';
 import { zodTextFormat } from 'openai/helpers/zod';
 import type { ResponseCreateParamsNonStreaming, ResponseInputContent, ResponseInputMessageItem } from 'openai/resources/responses/responses';
 import { PDFParse } from 'pdf-parse';
+import { getData as getPdfWorkerData } from 'pdf-parse/worker';
 import { z } from 'zod';
+
+PDFParse.setWorker(getPdfWorkerData());
 
 import type { AnalysisResult } from '../../../shared/types.js';
 

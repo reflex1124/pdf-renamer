@@ -471,8 +471,9 @@ export default function App() {
           size="2"
           variant="surface"
         >
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-3">
+            <Text className="shrink-0 font-semibold tracking-tight" size="3">PDF Renamer</Text>
+            <div className="flex flex-1 flex-wrap items-center gap-2">
               <ToolbarButton
                 active={busyAction === 'analyzing'}
                 disabled={documents.length === 0 || busyAction !== null}
@@ -504,7 +505,7 @@ export default function App() {
               />
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 ml-auto">
               <MetaBadge label="件数" value={String(documents.length)} />
               <MetaBadge label="選択" value={String(selectedCount)} />
               <MetaBadge
@@ -517,8 +518,8 @@ export default function App() {
           </div>
         </Card>
 
-        <section className="grid min-h-0 flex-1 gap-3 xl:grid-cols-[300px_minmax(0,1fr)_288px]">
-          <Card className="flex min-h-0 flex-col overflow-hidden" size="2" variant="surface">
+        <section className="grid min-h-0 flex-1 grid-rows-1 gap-3 overflow-hidden lg:grid-cols-[280px_minmax(0,1fr)_272px]">
+          <Card className="!flex min-h-0 !flex-col overflow-hidden" size="2" variant="surface">
             <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--gray-a5)] pb-3">
               <div className="flex items-center gap-2">
                 <Text size="2" weight="medium">
@@ -551,15 +552,15 @@ export default function App() {
               </div>
             </div>
 
-            <ScrollArea className="mt-3 min-h-0 flex-1" scrollbars="vertical" type="auto">
+            <ScrollArea className="mt-3 !h-0 flex-1 [&>[data-radix-scroll-area-viewport]]:overflow-x-hidden" scrollbars="vertical" type="scroll">
               {documents.length === 0 ? (
                 <EmptyState />
               ) : (
-                <div className="space-y-2 pb-1 pr-2">
+                <div className="w-full space-y-2 pb-1">
                   {documents.map((item) => (
                     <button
                       key={item.key}
-                      className={`w-full rounded-[16px] border p-3 text-left transition ${
+                      className={`w-full min-w-0 overflow-hidden rounded-[16px] border p-3 text-left transition ${
                         currentKey === item.key
                           ? 'border-blue-8 bg-blue-3 shadow-[inset_0_0_0_1px_var(--blue-8)]'
                           : 'border-[var(--gray-a5)] bg-[var(--gray-a2)] hover:border-[var(--gray-a7)] hover:bg-[var(--gray-a3)]'
@@ -606,7 +607,7 @@ export default function App() {
             </ScrollArea>
           </Card>
 
-          <Card className="flex min-h-0 flex-col overflow-hidden" size="2" variant="surface">
+          <Card className="!flex min-h-0 !flex-col overflow-hidden" size="2" variant="surface">
             <div className="flex shrink-0 items-start justify-between gap-3 border-b border-[var(--gray-a5)] pb-3">
               <div className="min-w-0 flex-1">
                 <Text as="p" className="truncate" size="2" weight="medium">
@@ -646,8 +647,8 @@ export default function App() {
               ) : null}
             </div>
 
-            <ScrollArea className="mt-3 min-h-0 flex-1 pr-1" scrollbars="vertical" type="auto">
-              <div className="grid gap-3 pb-4 pr-3">
+            <ScrollArea className="mt-3 !h-0 flex-1" scrollbars="vertical" type="scroll">
+              <div className="!w-full grid gap-3 pb-px">
                 <div className="grid gap-2 md:grid-cols-2">
                   <StatusInfoCard status={currentDocument?.status ?? null} />
                   <InfoCard label="confidence" value={currentDocument?.analysis ? currentDocument.analysis.confidence.toFixed(2) : '-'} />
@@ -687,7 +688,7 @@ export default function App() {
                     </Text>
                   </div>
                   <ScrollArea
-                    className="h-[340px] rounded-[12px] border border-[var(--gray-a5)] bg-[var(--gray-a2)] [scrollbar-gutter:stable_both-edges]"
+                    className="!h-[340px] rounded-[12px] border border-[var(--gray-a5)] bg-[var(--gray-a2)] [scrollbar-gutter:stable_both-edges]"
                     scrollbars="vertical"
                     type="auto"
                   >
@@ -702,15 +703,15 @@ export default function App() {
             </ScrollArea>
           </Card>
 
-          <Card className="flex min-h-0 flex-col overflow-hidden" size="2" variant="surface">
+          <Card className="!flex min-h-0 !flex-col overflow-hidden" size="2" variant="surface">
             <div className="flex shrink-0 items-center gap-2 border-b border-[var(--gray-a5)] pb-3">
               <MixerHorizontalIcon />
               <Text size="2" weight="medium">
                 設定
               </Text>
             </div>
-            <ScrollArea className="mt-3 min-h-0 flex-1 pr-1" scrollbars="vertical" type="auto">
-              <div className="grid gap-3 pb-4 pr-3">
+            <ScrollArea className="mt-3 !h-0 flex-1" scrollbars="vertical" type="scroll">
+              <div className="!w-full grid gap-3 pb-4">
                 <div className="grid gap-2.5">
                   <Text className="leading-none" color="gray" size="1">
                     モデル
@@ -729,6 +730,7 @@ export default function App() {
 
                 <div className="flex items-center gap-2">
                   <Button
+                    className="flex-1 justify-center"
                     color="gray"
                     disabled={busyAction !== null}
                     onClick={() => void handleLoadModels()}
@@ -739,6 +741,7 @@ export default function App() {
                     一覧
                   </Button>
                   <Button
+                    className="flex-1 justify-center"
                     disabled={busyAction !== null}
                     onClick={() => void handleSaveSettings()}
                     size="2"

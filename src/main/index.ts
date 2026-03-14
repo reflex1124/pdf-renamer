@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron';
 
 import { loadEnvironment } from './services/env.js';
 import { DocumentController } from './services/document-controller.js';
@@ -54,6 +54,7 @@ async function bootstrap(): Promise<void> {
 }
 
 async function createWindow(): Promise<void> {
+  Menu.setApplicationMenu(null);
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -71,7 +72,7 @@ async function createWindow(): Promise<void> {
 
   if (process.env.ELECTRON_RENDERER_URL) {
     await mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
-    mainWindow.webContents.openDevTools({ mode: 'detach' });
+
   } else {
     await mainWindow.loadFile(path.resolve(moduleDir, '../renderer/index.html'));
   }

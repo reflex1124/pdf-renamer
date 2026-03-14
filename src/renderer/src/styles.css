@@ -42,3 +42,10 @@ select {
   background: rgba(96, 165, 250, 0.32);
   color: white;
 }
+
+/* Radix ScrollArea の viewport が flex コンテナのため、
+   直下要素が min-width: auto でコンテンツ幅まで広がってしまう問題を修正 */
+.rt-ScrollAreaViewport > * {
+  max-width: 100%;
+  min-width: 0;
+}
