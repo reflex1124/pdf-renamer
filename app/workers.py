@@ -39,7 +39,7 @@ class AnalysisWorker(QRunnable):
 
     def run(self) -> None:
         try:
-            analysis = self.analyzer.analyze_pdf(str(self.pdf_path))
+            analysis = self.analyzer.analyze_document(str(self.pdf_path))
             proposed_name = build_proposed_filename(analysis, self.naming_template)
             self.signals.result.emit(str(self.pdf_path), analysis, proposed_name)
         except Exception as exc:  # noqa: BLE001

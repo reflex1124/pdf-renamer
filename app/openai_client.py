@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import logging
 import os
 import re
@@ -14,6 +15,8 @@ from .models import AnalysisResult
 
 logger = logging.getLogger(__name__)
 SNAPSHOT_SUFFIX = re.compile(r"-\d{4}-\d{2}-\d{2}$")
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+PDF_EXTENSION = ".pdf"
 
 
 class AnalysisSchema(BaseModel):
@@ -52,6 +55,9 @@ class OpenAIPdfAnalyzer:
 
     def set_model(self, model: str) -> None:
         self.model = model.strip() or self.model
+
+    def supported_extensions(self) -> set[str]:
+        return set(IMAGE_EXTENSIONS) | {PDF_EXTENSION}
 
     def list_models(self) -> list[str]:
         response = self.client.models.list()
@@ -100,6 +106,123 @@ class OpenAIPdfAnalyzer:
             raise RuntimeError("PDF からテキストを抽出できませんでした。画像PDFはOCRが必要です。")
 
         return extracted[:max_chars]
+
+    def has_extractable_text(self, pdf_path: str, threshold: int = 20) -> bool:
+        try:
+            return len(self.extract_text(pdf_path, max_chars=2000).strip()) >= threshold
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _single_document_prompt(self) -> list[dict[str, object]]:
+        return [
+            {
+                "role": "system",
+                "content": (
+                    "You extract structured metadata from business documents. "
+                    "The document_type must always be written in Japanese. "
+                    "Use labels such as '請求書', '領収書', '見積書', '納品書', '契約書', '注文書', '明細書', or 'その他'. "
+                    "Extract description from fields such as 内容, 内訳, Description, Item, Details, or similar. "
+                    "description should be a short summary of what the charge or document is for. "
+                    "For missing values, use null. "
+                    "Preserve the original currency in amount values and normalize it to ISO currency codes. "
+                    "For example use 'USD 12.34', 'JPY 1200', 'EUR 9.99', or 'GBP 72.10'. "
+                    "Dates must be normalized to YYYY-MM-DD when possible, or YYYY-MM-01 if only year and month are known. "
+                    "Confidence must be a number between 0.0 and 1.0."
+                ),
+            },
+        ]
+
+    def _parse_single_response(self, response) -> AnalysisResult:
+        parsed = response.output_parsed
+        return AnalysisResult(
+            document_type=parsed.document_type,
+            issuer_name=parsed.issuer_name,
+            date=parsed.date,
+            amount=parsed.amount,
+            title=parsed.title,
+            description=parsed.description,
+            confidence=max(0.0, min(1.0, parsed.confidence)),
+        )
+
+    def _analyze_text_content(self, text: str, filename: str) -> AnalysisResult:
+        response = self.client.responses.parse(
+            model=self.model,
+            input=[
+                *self._single_document_prompt(),
+                {
+                    "role": "user",
+                    "content": (
+                        f"Analyze this business document text extracted from '{filename}'. "
+                        "Return the structured result.\n\n"
+                        f"{text}"
+                    ),
+                },
+            ],
+            text_format=AnalysisSchema,
+        )
+        return self._parse_single_response(response)
+
+    def _upload_file(self, path: Path) -> str:
+        with path.open("rb") as handle:
+            uploaded = self.client.files.create(file=handle, purpose="user_data")
+        return uploaded.id
+
+    def _analyze_pdf_with_file_input(self, pdf_path: str) -> AnalysisResult:
+        path = Path(pdf_path)
+        file_id = self._upload_file(path)
+        response = self.client.responses.parse(
+            model=self.model,
+            input=[
+                *self._single_document_prompt(),
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_file",
+                            "file_id": file_id,
+                        },
+                        {
+                            "type": "input_text",
+                            "text": (
+                                f"Analyze this PDF file named '{path.name}'. "
+                                "Use OCR if needed and return the structured result."
+                            ),
+                        },
+                    ],
+                },
+            ],
+            text_format=AnalysisSchema,
+        )
+        return self._parse_single_response(response)
+
+    def _analyze_image_file(self, image_path: str) -> AnalysisResult:
+        path = Path(image_path)
+        suffix = path.suffix.lower().lstrip(".") or "png"
+        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        response = self.client.responses.parse(
+            model=self.model,
+            input=[
+                *self._single_document_prompt(),
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": (
+                                f"Analyze this document image named '{path.name}'. "
+                                "Read the image directly and return the structured result."
+                            ),
+                        },
+                        {
+                            "type": "input_image",
+                            "image_url": f"data:image/{suffix};base64,{encoded}",
+                        },
+                    ],
+                },
+            ],
+            text_format=AnalysisSchema,
+        )
+        return self._parse_single_response(response)
 
     def _build_batch_input(self, pdf_paths: list[str], max_chars_per_pdf: int = 6000) -> list[dict[str, str]]:
         documents: list[dict[str, str]] = []
@@ -176,3 +299,17 @@ class OpenAIPdfAnalyzer:
 
     def analyze_pdf(self, pdf_path: str) -> AnalysisResult:
         return self.analyze_pdfs([pdf_path])[pdf_path]
+
+    def analyze_document(self, document_path: str) -> AnalysisResult:
+        path = Path(document_path)
+        suffix = path.suffix.lower()
+        if suffix in IMAGE_EXTENSIONS:
+            logger.info("Analyzing image document via vision input: %s", document_path)
+            return self._analyze_image_file(document_path)
+        if suffix == PDF_EXTENSION:
+            if self.has_extractable_text(document_path):
+                logger.info("Analyzing text-extractable PDF: %s", document_path)
+                return self.analyze_pdf(document_path)
+            logger.info("Analyzing OCR fallback PDF via file input: %s", document_path)
+            return self._analyze_pdf_with_file_input(document_path)
+        raise RuntimeError(f"未対応のファイル形式です: {path.suffix}")

@@ -35,7 +35,7 @@ from .file_utils import (
     AVAILABLE_TOKENS,
     DEFAULT_TEMPLATE,
     build_proposed_filename,
-    ensure_pdf_extension,
+    ensure_extension,
     normalize_template,
     resolve_collision,
     sanitize_filename_component,
@@ -47,6 +47,8 @@ from .settings_store import load_settings, save_settings
 from .workers import AnalysisWorker, BatchAnalysisWorker
 
 logger = logging.getLogger(__name__)
+SUPPORTED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+SUPPORTED_DOCUMENT_EXTENSIONS = {".pdf", *SUPPORTED_IMAGE_EXTENSIONS}
 
 
 class PdfListRow(QWidget):
@@ -115,6 +117,31 @@ class PdfListRow(QWidget):
         self.filename_label.setText(metrics.elidedText(self.full_filename, Qt.TextElideMode.ElideRight, available_width))
 
 
+class ElidedLabel(QLabel):
+    def __init__(self, text: str = "-", parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._full_text = text
+        self.setWordWrap(False)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.setText(text)
+
+    def setText(self, text: str) -> None:  # type: ignore[override]
+        self._full_text = text or "-"
+        self.setToolTip(self._full_text)
+        self._update_elided_text()
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        self._update_elided_text()
+
+    def _update_elided_text(self) -> None:
+        metrics = QFontMetrics(self.font())
+        available_width = max(40, self.contentsRect().width())
+        super().setText(
+            metrics.elidedText(self._full_text, Qt.TextElideMode.ElideRight, available_width),
+        )
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -149,14 +176,13 @@ class MainWindow(QMainWindow):
         self.status_value.setProperty("compact", True)
         self.status_value.setProperty("variant", "idle")
         self.status_value.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self.doc_type_value = QLabel("-")
-        self.issuer_value = QLabel("-")
-        self.date_value = QLabel("-")
-        self.amount_value = QLabel("-")
-        self.title_value = QLabel("-")
-        self.description_value = QLabel("-")
-        self.description_value.setWordWrap(True)
-        self.confidence_value = QLabel("-")
+        self.doc_type_value = ElidedLabel("-")
+        self.issuer_value = ElidedLabel("-")
+        self.date_value = ElidedLabel("-")
+        self.amount_value = ElidedLabel("-")
+        self.title_value = ElidedLabel("-")
+        self.description_value = ElidedLabel("-")
+        self.confidence_value = ElidedLabel("-")
         self.proposed_name_value = QLabel("-")
         self.proposed_name_value.setWordWrap(True)
         self.proposed_name_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -230,11 +256,12 @@ class MainWindow(QMainWindow):
         list_layout = QVBoxLayout(list_panel)
         list_layout.setSpacing(6)
         header_row = QHBoxLayout()
-        header_row.addWidget(QLabel("PDF一覧"))
+        header_row.addWidget(QLabel("ドキュメント一覧"))
         header_row.addStretch()
         header_row.addWidget(self.add_files_button)
         header_row.addWidget(self.clear_files_button)
         list_layout.addLayout(header_row)
+        list_layout.addWidget(QLabel("PDF・画像をこのウィンドウへドラッグ&ドロップできます"))
         list_layout.addSpacing(8)
         list_container = QFrame()
         list_container.setProperty("role", "listContainer")
@@ -278,6 +305,7 @@ class MainWindow(QMainWindow):
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
         form.setFormAlignment(Qt.AlignTop | Qt.AlignLeft)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         form.setHorizontalSpacing(16)
         form.setVerticalSpacing(10)
         form.addRow("状態", self.status_value)
@@ -505,7 +533,7 @@ class MainWindow(QMainWindow):
         for url in event.mimeData().urls():
             if url.isLocalFile():
                 local_path = Path(url.toLocalFile())
-                if local_path.suffix.lower() == ".pdf":
+                if local_path.suffix.lower() in SUPPORTED_DOCUMENT_EXTENSIONS:
                     paths.append(str(local_path))
         if paths:
             self.add_files(paths)
@@ -516,9 +544,9 @@ class MainWindow(QMainWindow):
     def pick_files(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(
             self,
-            "PDF を選択",
+            "ドキュメントを選択",
             "",
-            "PDF Files (*.pdf)",
+            "Documents (*.pdf *.png *.jpg *.jpeg *.webp *.gif)",
         )
         if paths:
             self.add_files(paths)
@@ -540,7 +568,7 @@ class MainWindow(QMainWindow):
             list_item.setSizeHint(QSize(0, 36))
             self.pdf_list.setItemWidget(list_item, row)
             added_any = True
-            logger.info("Added PDF: %s", path)
+            logger.info("Added document: %s", path)
 
         if added_any and self.pdf_list.currentRow() == -1:
             self.pdf_list.setCurrentRow(0)
@@ -776,10 +804,25 @@ class MainWindow(QMainWindow):
         ]
         if not analyzable:
             return
-        if len(analyzable) == 1:
-            self._start_analysis(analyzable[0])
+        batchable: list[PdfItem] = []
+        single_items: list[PdfItem] = []
+        for item in analyzable:
+            suffix = item.current_path.suffix.lower()
+            if suffix == ".pdf" and self.analyzer.has_extractable_text(str(item.current_path)):
+                batchable.append(item)
+            else:
+                single_items.append(item)
+
+        if len(batchable) == 1 and not single_items:
+            self._start_analysis(batchable[0])
             return
-        self._start_batch_analysis(analyzable)
+        if len(batchable) > 1:
+            self._start_batch_analysis(batchable)
+        elif len(batchable) == 1:
+            self._start_analysis(batchable[0])
+
+        for item in single_items:
+            self._start_analysis(item)
 
     def _start_analysis(self, item: PdfItem) -> None:
         if not self.analyzer:
@@ -821,7 +864,7 @@ class MainWindow(QMainWindow):
         if not item:
             return
         item.analysis = analysis
-        item.proposed_name = proposed_name
+        item.proposed_name = ensure_extension(proposed_name, item.current_path.suffix)
         item.error_message = ""
         item.status = ItemStatus.READY if analysis.confidence >= 0.8 else ItemStatus.NEEDS_REVIEW
         item.history.append(f"analyzed:{json.dumps(analysis.to_dict(), ensure_ascii=False)}")
@@ -848,7 +891,7 @@ class MainWindow(QMainWindow):
             if not item:
                 continue
             item.analysis = analysis
-            item.proposed_name = proposed_name
+            item.proposed_name = ensure_extension(proposed_name, item.current_path.suffix)
             item.error_message = ""
             item.status = ItemStatus.READY if analysis.confidence >= 0.8 else ItemStatus.NEEDS_REVIEW
             item.history.append(f"analyzed:{json.dumps(analysis.to_dict(), ensure_ascii=False)}")
@@ -879,7 +922,7 @@ class MainWindow(QMainWindow):
         if not accepted:
             return
         edited = sanitize_filename_component(edited_text, "renamed") or "renamed"
-        item.proposed_name = ensure_pdf_extension(edited)
+        item.proposed_name = ensure_extension(edited, item.current_path.suffix)
         self.proposed_name_value.setText(item.proposed_name)
         self._refresh_list()
 
@@ -903,6 +946,7 @@ class MainWindow(QMainWindow):
                     item.analysis,
                     self.settings.naming_template,
                 )
+                item.proposed_name = ensure_extension(item.proposed_name, item.current_path.suffix)
 
         self.naming_template_edit.setText(template)
         self._refresh_list()
@@ -957,11 +1001,11 @@ class MainWindow(QMainWindow):
         for item in targets:
             if item.status == ItemStatus.RENAMED or not item.proposed_name:
                 continue
-            normalized_name = ensure_pdf_extension(item.proposed_name)
+            normalized_name = ensure_extension(item.proposed_name, item.current_path.suffix)
             same_name_target = item.current_path.parent / normalized_name
             target = same_name_target
             if same_name_target != item.current_path:
-                target = resolve_collision(item.current_path.parent, normalized_name)
+                target = resolve_collision(item.current_path.parent, normalized_name, item.current_path.suffix)
             source = item.current_path
             source.rename(target)
             item.current_path = target

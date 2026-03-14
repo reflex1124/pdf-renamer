@@ -167,15 +167,22 @@ def build_proposed_filename(
 
     if not parts:
         parts = [token_map["date"], token_map["issuer_name"], token_map["document_type"]]
-    return "_".join(parts) + ".pdf"
+    return "_".join(parts)
 
 
-def ensure_pdf_extension(name: str) -> str:
-    return name if name.lower().endswith(".pdf") else f"{name}.pdf"
+def ensure_extension(name: str, extension: str) -> str:
+    normalized_extension = extension if extension.startswith(".") else f".{extension}"
+    stripped = name.strip()
+    if stripped.lower().endswith(normalized_extension.lower()):
+        return stripped
+    existing_suffix = Path(stripped).suffix
+    if existing_suffix:
+        stripped = stripped[: -len(existing_suffix)]
+    return f"{stripped}{normalized_extension}"
 
 
-def resolve_collision(directory: Path, target_name: str) -> Path:
-    safe_name = ensure_pdf_extension(target_name)
+def resolve_collision(directory: Path, target_name: str, extension: str) -> Path:
+    safe_name = ensure_extension(target_name, extension)
     candidate = directory / safe_name
     if not candidate.exists():
         return candidate

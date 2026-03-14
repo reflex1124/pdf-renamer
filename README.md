@@ -1,6 +1,6 @@
 # PDF Renamer
 
-PySide6 で作ったデスクトップ GUI アプリです。PDF をドラッグ&ドロップし、OpenAI API で内容を解析して、安全な候補ファイル名を提案し、確認後にローカルファイルをリネームします。
+PySide6 で作ったデスクトップ GUI アプリです。PDF や画像をドラッグ&ドロップし、OpenAI API で内容を解析して、安全な候補ファイル名を提案し、確認後にローカルファイルをリネームします。
 
 ## Setup
 
@@ -44,5 +44,6 @@ OPENAI_API_KEY=sk-...
 - 使用する OpenAI モデル名も `config/settings.json` に保存されます。
 - 使えるトークンは `{date}`, `{issuer_name}`, `{document_type}`, `{amount}`, `{title}` です。
 - デフォルトの命名ルールは `{date}_{issuer_name}_{document_type}_{amount}` です。
-- 現在の最小構成では `pypdf` でテキスト抽出してから OpenAI に送ります。
-- 画像のみのスキャン PDF は OCR 未対応のため、そのままでは解析できません。
+- テキスト抽出できる PDF は `pypdf` で読み取ってから OpenAI に送ります。
+- テキストのないスキャン PDF は OpenAI の PDF 入力を使った OCR fallback で解析します。
+- `png`, `jpg`, `jpeg`, `webp`, `gif` の画像ファイルも解析できます。
