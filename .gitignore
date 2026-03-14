@@ -1,11 +1,21 @@
-.venv/
-__pycache__/
+# Dependencies
 node_modules/
-.astro/
+
+# Build outputs
 dist/
-out/
 coverage/
-release/
-logs/
+
+# Tauri build outputs
+src-tauri/target/
+src-tauri/gen/
+
+# Secrets
 .env
-config/settings.json
+src-tauri/.env
+
+# Logs
+logs/
+
+# OS
+.DS_Store
+Thumbs.db

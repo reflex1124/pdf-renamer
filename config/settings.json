@@ -1,0 +1,4 @@
+{
+  "naming_template": "{date}_{issuer_name}_{document_type}_{amount}",
+  "openai_model": "gpt-5-mini"
+}

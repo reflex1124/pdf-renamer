@@ -7,7 +7,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html'],
-      exclude: ['out/**', 'release/**', 'node_modules/**'],
+      exclude: ['out/**', 'dist/**', 'release/**', 'node_modules/**', 'src-tauri/**'],
     },
   },
 });

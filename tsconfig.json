@@ -17,7 +17,6 @@
     "jsx": "react-jsx",
     "types": [
       "node",
-      "electron",
       "vitest/globals"
     ],
     "baseUrl": ".",
@@ -31,11 +30,18 @@
     }
   },
   "include": [
-    "src/**/*.ts",
-    "src/**/*.tsx",
+    "src/renderer/**/*.ts",
+    "src/renderer/**/*.tsx",
     "shared/**/*.ts",
-    "tests/**/*.ts",
-    "electron.vite.config.ts",
+    "vite.config.ts",
     "vitest.config.ts"
+  ],
+  "exclude": [
+    "src/main",
+    "src/preload",
+    "tests",
+    "node_modules",
+    "dist",
+    "src-tauri"
   ]
 }
